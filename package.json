@@ -1,0 +1,17 @@
+{
+  "name": "pxn-owner-bot",
+  "version": "1.0.0",
+  "description": "Light WhatsApp bot for the PXN owner number: saves new customers to contacts, sends the group invite once, and chases a customer you haven't replied to.",
+  "main": "owner-bot.js",
+  "private": true,
+  "scripts": {
+    "start": "node owner-bot.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.34.7"
+  }
+}

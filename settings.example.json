@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "autoSaveContacts": true,
+  "contactNextNumber": 1,
+  "invite": {
+    "enabled": true,
+    "message": "👋 *Welcome to PXN STORES!*\n\nJoin our official WhatsApp group for updates & offers:\n👉 https://chat.whatsapp.com/YOUR-GROUP-INVITE-CODE"
+  },
+  "noReply": {
+    "enabled": true,
+    "minutes": 10,
+    "message": "Hi! 🙏 Sorry for the wait — we've seen your message and will reply as soon as we can."
+  }
+}

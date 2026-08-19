@@ -1,0 +1,27 @@
+# PXN Owner Bot —  docker compose up -d --build
+#
+# First run: `docker compose logs -f` and scan the QR with the OWNER phone.
+# To link with a code instead, set PAIR_NUMBER below to the owner's number.
+services:
+  pxn-owner-bot:
+    build: .
+    container_name: pxn-owner-bot
+    restart: unless-stopped
+    environment:
+      # The bot is light, but Chromium is not — cap Node's heap so the two
+      # together stay inside a small VPS.
+      - NODE_OPTIONS=--max-old-space-size=256
+      # - PAIR_NUMBER=947XXXXXXXX   # link with an 8-digit code instead of a QR
+    volumes:
+      # The WhatsApp login. Delete this to force a fresh QR.
+      - ./.wwebjs_auth:/app/.wwebjs_auth
+      # Who has been greeted / saved already.
+      - ./state:/app/state
+      # Live config, edited on the host — changes apply on the next message,
+      # no restart needed.
+      - ./settings.json:/app/settings.json
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 700M

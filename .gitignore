@@ -1,0 +1,11 @@
+node_modules/
+
+# WhatsApp session — this is a live login to the owner's number. Never commit it.
+.wwebjs_auth*/
+.wwebjs_cache/
+qr.png
+
+# Live config and state: real group links, counters, who has already been
+# greeted. Belongs on the machine that runs the bot, not in the repo.
+settings.json
+state/
