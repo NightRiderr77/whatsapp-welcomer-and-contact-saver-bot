@@ -15,11 +15,13 @@ services:
     volumes:
       # The WhatsApp login. Delete this to force a fresh QR.
       - ./.wwebjs_auth:/app/.wwebjs_auth
-      # Who has been greeted / saved already.
+      # settings.json plus who has been greeted / saved already.
+      #
+      # Only ever mount DIRECTORIES here. Docker silently creates a *directory*
+      # when a bind-mounted file is missing on the host, and settings.json used
+      # to be mounted as a file: one missing file made every read fail, the bot
+      # fell back to defaults, and every customer was saved as "Cus 1".
       - ./state:/app/state
-      # Live config, edited on the host — changes apply on the next message,
-      # no restart needed.
-      - ./settings.json:/app/settings.json
     deploy:
       resources:
         limits:

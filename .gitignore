@@ -7,5 +7,4 @@ qr.png
 
 # Live config and state: real group links, counters, who has already been
 # greeted. Belongs on the machine that runs the bot, not in the repo.
-settings.json
 state/

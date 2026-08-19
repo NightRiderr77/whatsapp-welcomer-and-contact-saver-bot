@@ -9,6 +9,7 @@
   "noReply": {
     "enabled": true,
     "minutes": 10,
-    "message": "Hi! 🙏 Sorry for the wait — we've seen your message and will reply as soon as we can."
+    "message": "Hi! 🙏 Sorry for the wait — we've seen your message and will reply as soon as we can.",
+    "firstContactOnly": true
   }
 }

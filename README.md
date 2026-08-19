@@ -17,7 +17,7 @@ database, no dashboard, no HTTP server. One file, two dependencies.
 
 ```bash
 npm install
-cp settings.example.json settings.json   # then edit it
+mkdir -p state && cp settings.example.json state/settings.json   # then edit it
 node owner-bot.js
 ```
 
@@ -31,7 +31,7 @@ number instead"*.
 Docker:
 
 ```bash
-cp settings.example.json settings.json    # must exist before the first up
+mkdir -p state && cp settings.example.json state/settings.json
 docker compose up -d --build
 docker compose logs -f                    # scan the QR here
 ```
@@ -46,7 +46,7 @@ pm2 start ecosystem.config.js && pm2 save
 
 ## Configuration
 
-Everything lives in **`settings.json`**, which is re-read on every message —
+Everything lives in **`state/settings.json`**, which is re-read on every message —
 **edit it and the change applies immediately, no restart.** That is what
 replaces the old dashboard.
 
@@ -59,10 +59,18 @@ replaces the old dashboard.
 | `invite.message` | What to send. **No message means nothing is sent**, whatever `enabled` says. |
 | `noReply.enabled` | Chase customers you haven't answered. |
 | `noReply.minutes` | How long to wait first. |
+| `noReply.firstContactOnly` | **Default `true`.** Only ever chase someone the bot watched arrive as a brand-new customer. Set `false` and it will chase any unanswered chat. |
 | `noReply.message` | What to send them. |
 
-`settings.json` is git-ignored: it holds your live group link and your customer
-counter, and belongs on the machine that runs the bot.
+The file lives at **`state/settings.json`** and is git-ignored: it holds your
+live group link and your customer counter, and belongs on the machine that runs
+the bot. The bot writes `contactNextNumber` back to it as it saves people, so
+the counter survives restarts.
+
+Nothing is ever sent to a conversation that existed before the bot started.
+WhatsApp replays unread messages when a client links, and treating that replay
+as new traffic is how an earlier build sent "sorry for the wait" into a few
+hundred old chats at once.
 
 > **Check `noReply.message` before you go live.** If it points customers at
 > another WhatsApp number, make sure that number is still answered. The old
@@ -76,7 +84,7 @@ counter, and belongs on the machine that runs the bot.
 | `PUPPETEER_EXECUTABLE_PATH` | Puppeteer's own | Path to Chromium, when it isn't bundled. |
 | `WWEBJS_PATH` | `./.wwebjs_auth` | Where the WhatsApp session is kept. |
 | `STATE_DIR` | `./state` | Where "already greeted / already saved" is kept. |
-| `SETTINGS_FILE` | `./settings.json` | Config location. |
+| `SETTINGS_FILE` | `<STATE_DIR>/settings.json` | Config location. |
 
 ---
 
@@ -87,9 +95,9 @@ the owner to scan a QR again or re-greeting every existing customer:
 
 ```bash
 # from the old agent folder, onto the new one
-cp -r .wwebjs_auth_owner            <new>/.wwebjs_auth
-cp    owner_settings.json           <new>/settings.json
 mkdir -p                            <new>/state
+cp -r .wwebjs_auth_owner            <new>/.wwebjs_auth
+cp    owner_settings.json           <new>/state/settings.json
 cp    owner_greeted.json            <new>/state/greeted.json
 cp    owner_saved_contacts.json     <new>/state/saved-contacts.json
 ```

@@ -27,11 +27,32 @@ const QRCode = require('qrcode');
 
 const SESSION_PATH  = process.env.WWEBJS_PATH   || path.join(__dirname, '.wwebjs_auth');
 const STATE_DIR     = process.env.STATE_DIR     || path.join(__dirname, 'state');
-const SETTINGS_FILE = process.env.SETTINGS_FILE || path.join(__dirname, 'settings.json');
 const QR_FILE       = path.join(__dirname, 'qr.png');
 const PAIR_NUMBER   = String(process.env.PAIR_NUMBER || '').replace(/\D/g, '');
 
 const log = (...a) => console.log(`[${new Date().toISOString()}] [owner]`, ...a);
+
+/**
+ * Anything that arrived before we connected is history, not news.
+ *
+ * WhatsApp replays unread messages when a client links, so a conversation from
+ * this morning — one the owner may already have answered from their phone —
+ * arrives as a fresh `message` event. Treating those as new is what once put
+ * "sorry for the wait" into a few hundred old chats at once.
+ */
+const STARTED_AT = Math.floor(Date.now() / 1000);
+
+/**
+ * Settings live in the state directory, not next to the code.
+ *
+ * They used to sit at ./settings.json and be bind-mounted into the container as
+ * a single *file*. Docker creates a directory when the mount source doesn't
+ * exist yet, so one missing file turned every read into EISDIR, the bot fell
+ * back to defaults, and every customer was saved as "Cus 1" with a message
+ * nobody wrote. Directories are safe to auto-create; files are not.
+ */
+const SETTINGS_FILE = process.env.SETTINGS_FILE || path.join(STATE_DIR, 'settings.json');
+const LEGACY_SETTINGS_FILE = path.join(__dirname, 'settings.json');
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 //
@@ -49,13 +70,42 @@ const DEFAULTS = {
   noReply: {
     enabled: true,
     minutes: 10,
+    /* Only chase someone the bot itself watched arrive as a brand-new
+       customer. Without this, every existing chat the owner had not answered
+       yet is fair game, which is not what "message a new customer" means. */
+    firstContactOnly: true,
     message: 'Hi! Sorry for the wait — we have seen your message and will reply as soon as we can.',
   },
 };
 
+/**
+ * Read the settings file, and be loud when it can't be read.
+ *
+ * The previous version returned defaults on any error, silently. That is how a
+ * broken mount became a live incident instead of a log line: the bot cheerfully
+ * ran with `contactNextNumber: 1` and a message nobody had written. A config
+ * file that exists but cannot be used is a fault, and it says so — once per
+ * minute rather than per message, because this is called on every message.
+ */
+let _lastSettingsComplaint = 0;
+function complain(msg) {
+  const now = Date.now();
+  if (now - _lastSettingsComplaint < 60_000) return;
+  _lastSettingsComplaint = now;
+  log('SETTINGS:', msg, '— running on defaults until this is fixed');
+}
+
 function loadSettings() {
+  let text;
   try {
-    const raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    text = fs.readFileSync(SETTINGS_FILE, 'utf8');
+  } catch (e) {
+    // ENOENT on first run is normal — ensureSettingsFile() writes one.
+    if (e.code !== 'ENOENT') complain(`cannot read ${SETTINGS_FILE}: ${e.message}`);
+    return JSON.parse(JSON.stringify(DEFAULTS));
+  }
+  try {
+    const raw = JSON.parse(text);
     // A shallow merge would wipe half of a nested block when the file sets only
     // one field of it, so the two nested blocks are merged in their own right.
     return {
@@ -63,8 +113,38 @@ function loadSettings() {
       invite : { ...DEFAULTS.invite,  ...(raw.invite  || {}) },
       noReply: { ...DEFAULTS.noReply, ...(raw.noReply || {}) },
     };
-  } catch {
+  } catch (e) {
+    complain(`${SETTINGS_FILE} is not valid JSON: ${e.message}`);
     return JSON.parse(JSON.stringify(DEFAULTS));
+  }
+}
+
+/**
+ * Make sure there is a settings file before a single message is handled, and
+ * refuse to start rather than run on defaults nobody chose.
+ */
+function ensureSettingsFile() {
+  let st = null;
+  try { st = fs.statSync(SETTINGS_FILE); } catch { /* not there yet */ }
+
+  if (st && st.isDirectory()) {
+    log(`FATAL: ${SETTINGS_FILE} is a directory, not a file.`);
+    log('Docker creates a directory when a bind-mounted file is missing on the host.');
+    log(`Remove it, put a real settings.json there, and start again.`);
+    process.exit(1);
+  }
+
+  if (!st) {
+    // Carry a file over from the old layout rather than silently ignoring it.
+    try {
+      if (fs.statSync(LEGACY_SETTINGS_FILE).isFile()) {
+        fs.copyFileSync(LEGACY_SETTINGS_FILE, SETTINGS_FILE);
+        log(`moved settings from ${LEGACY_SETTINGS_FILE} to ${SETTINGS_FILE}`);
+        return;
+      }
+    } catch { /* no legacy file either */ }
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(DEFAULTS, null, 2));
+    log(`no settings file — wrote defaults to ${SETTINGS_FILE}. Edit it; changes apply immediately.`);
   }
 }
 
@@ -94,6 +174,7 @@ function loadIdSet(file) {
 }
 
 fs.mkdirSync(STATE_DIR, { recursive: true });
+ensureSettingsFile();
 const GREETED_FILE = path.join(STATE_DIR, 'greeted.json');
 const SAVED_FILE   = path.join(STATE_DIR, 'saved-contacts.json');
 const greeted = loadIdSet(GREETED_FILE);
@@ -225,6 +306,12 @@ client.on('message', async (msg) => {
     if (msg.from === 'status@broadcast' || msg.fromMe) return;
     if (typeof msg.from === 'string' && msg.from.endsWith('@g.us')) return; // groups are not customers
 
+    /* History, not news. WhatsApp replays unread messages when a client links,
+       so without this every old unanswered chat looks like it just arrived —
+       and gets saved, greeted and chased all over again. */
+    const sentAt = Number(msg.timestamp) || 0;
+    if (sentAt && sentAt < STARTED_AT) return;
+
     const s = loadSettings();
     if (!s.enabled) return;
 
@@ -233,11 +320,14 @@ client.on('message', async (msg) => {
     try { contact = await msg.getContact(); } catch { /* deleted account */ }
     const name = (contact && (contact.pushname || contact.name)) || chatId.replace(/@c\.us$/, '');
 
+    // Never seen before by either half of the bot: this is a first contact.
+    const isFirstContact = !saved.has(chatId) && !greeted.has(chatId);
+
     /* Start (or refresh) the reply clock. Refreshed only while we have not
        chased them yet — otherwise a customer who keeps typing resets the timer
        forever and never gets the message. */
     const cur = pending.get(chatId);
-    if (!cur) pending.set(chatId, { ts: Date.now(), name, notified: false });
+    if (!cur) pending.set(chatId, { ts: Date.now(), name, notified: false, isFirstContact });
     else if (!cur.notified) { cur.ts = Date.now(); cur.name = name; }
 
     if (s.autoSaveContacts && !saved.has(chatId)) {
@@ -301,7 +391,22 @@ setInterval(async () => {
       continue;
     }
     if (!s.enabled || !s.noReply.enabled || !s.noReply.message) continue;
+    if (s.noReply.firstContactOnly && !info.isFirstContact) { pending.delete(chatId); continue; }
     if (now - info.ts < waitMs) continue;
+
+    /* Last look before speaking. The owner replying from their phone normally
+       reaches us as a message_create event, but that event is missed if it
+       lands while we are reconnecting — and the cost of getting this wrong is
+       telling a customer we haven't answered them when we have. */
+    try {
+      const chat = await client.getChatById(chatId);
+      const [last] = await chat.fetchMessages({ limit: 1 });
+      if (last && last.fromMe) { pending.delete(chatId); continue; }
+    } catch (e) {
+      // Couldn't check: stay quiet rather than risk a wrong message.
+      log('could not verify chat before chasing:', e.message);
+      continue;
+    }
 
     info.notified = true;
     info.ts = now;
