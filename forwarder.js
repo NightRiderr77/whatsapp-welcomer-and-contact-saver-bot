@@ -157,20 +157,38 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
 
     let raw;
     try {
-      raw = await client.pupPage.evaluate(async (chatId) => {
+      raw = await client.pupPage.evaluate(async (chatId, want) => {
         const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
         if (!chat || !chat.msgs) return null;
-        return chat.msgs.getModelsArray()
-          .filter((m) => m && m.id && !m.isNotification)
-          .map((m) => ({
-            id: m.id._serialized,
-            fromMe: !!m.id.fromMe,
-            text: m.body || m.caption || '',
-            // How the library itself decides a message carries media.
-            hasMedia: Boolean(m.mediaKey && m.directPath),
-            t: m.t || 0,
-          }));
-      }, group.id);
+
+        const keep = (m) => m && m.id && !m.isNotification;
+        let msgs = chat.msgs.getModelsArray().filter(keep);
+
+        /* WhatsApp only keeps a chat's messages in memory once that chat has
+           been opened. For a group the owner has not looked at since this
+           session began — which is the normal case for a template group — the
+           collection is empty, and reading it straight off reports a group
+           with nothing in it. Pull the history in first, the same way the
+           library's own fetchMessages does. */
+        let rounds = 0;
+        while (msgs.length < want && rounds < 10) {
+          rounds++;
+          const older = await window
+            .require('WAWebChatLoadMessages')
+            .loadEarlierMsgs({ chat });
+          if (!older || !older.length) break;
+          msgs = [...older.filter(keep), ...msgs];
+        }
+
+        return msgs.map((m) => ({
+          id: m.id._serialized,
+          fromMe: !!m.id.fromMe,
+          text: m.body || m.caption || '',
+          // How the library itself decides a message carries media.
+          hasMedia: Boolean(m.mediaKey && m.directPath),
+          t: m.t || 0,
+        }));
+      }, group.id, Number(limit) || 40);
     } catch (e) {
       throw new Error(`could not read the group (${e.message || e}).`);
     }
@@ -188,7 +206,11 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
       .sort((a, b) => a.t - b.t)
       .slice(-limit);
 
-    templateCache = { messages, at: Date.now() };
+    /* Deliberately not cached when empty. An empty read is far more likely to
+       mean "the history had not loaded yet" than "the group is empty", and
+       caching it made every retry for the next five minutes fail the same way
+       without touching WhatsApp again. */
+    if (messages.length) templateCache = { messages, at: Date.now() };
     return messages;
   }
 
