@@ -36,5 +36,10 @@ services:
     deploy:
       resources:
         limits:
+          # CPU only, deliberately. A memory cap here is a trap: Chromium's
+          # renderer is killed by the cgroup long before Node notices, the
+          # WhatsApp page reloads, whatsapp-web.js re-injects and re-emits
+          # `authenticated`, and after enough of that WhatsApp unlinks the
+          # device — which looks like a login problem and is really a RAM one.
+          # WhatsApp Web wants roughly a gigabyte to itself on a bad day.
           cpus: "1.0"
-          memory: 700M

@@ -161,6 +161,12 @@ Bugs fixed on the way across:
   settings file is now fatal at startup instead of silent.
 - Unread history replayed at link time was treated as new traffic, so old
   answered chats got chased. Anything older than the process start is ignored.
+- A `memory` cap on the container unlinked the phone. Chromium's renderer is
+  killed by the cgroup long before Node feels anything, the WhatsApp tab
+  reloads, whatsapp-web.js re-injects on every navigation and re-emits
+  `authenticated`, and after enough of that WhatsApp drops the device with
+  `disconnected: LOGOUT`. It reads as a login fault and is a RAM one. The cap
+  is gone; repeated reloads now say so in the log.
 - Chromium stamps `<hostname>-<pid>` into a `SingletonLock` in the profile and
   refuses to open a profile it thinks another Chromium holds. A container's
   hostname is a new random id on every rebuild, so every rebuild inherited a

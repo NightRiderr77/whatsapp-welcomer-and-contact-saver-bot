@@ -257,27 +257,56 @@ client.on('qr', async (qr) => {
   log('Scan the QR above (also written to qr.png) with the OWNER phone.');
 });
 
+/* whatsapp-web.js re-injects into the page on every frame navigation, and each
+   injection re-emits `authenticated` and `ready`. So a burst of these is not a
+   burst of logins — it is the WhatsApp tab reloading over and over, which in a
+   container almost always means Chromium's renderer is being killed for
+   memory. Worth saying out loud, because the symptom that follows is WhatsApp
+   unlinking the device, which looks like a login fault instead of a RAM one. */
+let reloads = 0;
+let warnedAboutReloads = false;
+
 client.on('authenticated', () => {
-  log('authenticated');
+  reloads++;
+  if (reloads === 1) log('authenticated');
+  else if (reloads >= 3 && !warnedAboutReloads) {
+    warnedAboutReloads = true;
+    note(`WhatsApp Web has reloaded ${reloads} times — Chromium is probably running out of memory. Give the container more RAM; a memory limit here will end in WhatsApp unlinking this device.`);
+  }
   try { fs.unlinkSync(QR_FILE); } catch { /* already gone */ }
 });
 
+let announced = '';
 client.on('ready', () => {
   const s = loadSettings();
-  log('ready.',
+  const summary = [
     `contacts=${s.autoSaveContacts ? 'on' : 'off'}`,
     `invite=${s.invite.enabled && s.invite.message ? 'on' : 'off'}`,
-    `no-reply=${s.noReply.enabled ? s.noReply.minutes + 'm' : 'off'}`);
+    `no-reply=${s.noReply.enabled ? s.noReply.minutes + 'm' : 'off'}`,
+  ].join(' ');
+  // Only when something actually changed — see the reload note above.
+  if (summary === announced) return;
+  announced = summary;
+  log('ready.', summary);
   if (s.invite.enabled && !s.invite.message) {
     log('invite is enabled but has no message — nothing will be sent. Set invite.message in settings.json.');
   }
 });
 
 client.on('disconnected', (reason) => {
-  // Re-initialising on the same client leaves the old Chromium behind, and a
-  // few disconnects later the box is out of memory. Exit instead and let the
-  // supervisor (PM2 / Docker restart policy) start a clean process.
-  log('disconnected:', reason, '— exiting so the supervisor restarts us clean');
+  /* LOGOUT is not a hiccup: WhatsApp has unlinked this device and the library
+     has already deleted the stored session, so restarting only produces
+     another QR. Say that plainly instead of "restarting clean", because a
+     supervisor looping on a QR looks like a crash and is really a request. */
+  if (String(reason) === 'LOGOUT') {
+    log('WhatsApp unlinked this device. The saved session is gone — the next start will show a QR to scan.');
+    log('If this keeps happening within minutes of pairing, it is memory: see the reload warning above.');
+  } else {
+    // Re-initialising on the same client leaves the old Chromium behind, and a
+    // few disconnects later the box is out of memory. Exit instead and let the
+    // supervisor (PM2 / Docker restart policy) start a clean process.
+    log('disconnected:', reason, '— exiting so the supervisor restarts us clean');
+  }
   client.destroy().catch(() => {}).finally(() => process.exit(1));
 });
 
