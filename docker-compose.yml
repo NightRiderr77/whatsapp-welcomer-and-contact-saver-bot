@@ -6,6 +6,10 @@ services:
   pxn-owner-bot:
     build: .
     container_name: pxn-owner-bot
+    # Pinned, because Chromium stamps the hostname into the profile lock. Left
+    # to Docker it is a new random id on every rebuild, so yesterday's lock
+    # always reads as "in use by another computer" and the browser won't start.
+    hostname: pxn-owner-bot
     restart: unless-stopped
     environment:
       # The bot is light, but Chromium is not — cap Node's heap so the two

@@ -25,6 +25,7 @@
 
 const path   = require('path');
 const fs     = require('fs');
+const os     = require('os');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 const { startDashboard } = require('./dashboard');
@@ -446,6 +447,69 @@ setInterval(async () => {
   }
 }, SWEEP_MS);
 
+// ─── Stale profile locks ─────────────────────────────────────────────────────
+//
+// Chromium will not open a profile it believes another Chromium is using, and
+// records that claim as a `SingletonLock` symlink naming `<hostname>-<pid>`.
+//
+// In a container that claim outlives the process that made it. The container's
+// hostname is a fresh random id on every `docker compose up --build`, so the
+// lock left behind by yesterday's container names a machine that no longer
+// exists, and Chromium refuses to start with:
+//
+//   The profile appears to be in use by another Chromium process (15)
+//   on another computer (6d8331c9a2d0)
+//
+// which, with a restart policy in front of it, is an infinite crash loop.
+//
+// Clearing the lock is only safe when it is genuinely dead, so this checks
+// rather than assumes: a lock from a different machine cannot be live here, and
+// a lock from this machine is only cleared once its pid is gone.
+function clearStaleProfileLock() {
+  let entries;
+  try {
+    entries = fs.readdirSync(SESSION_PATH, { withFileTypes: true });
+  } catch {
+    return; // no session yet — first run
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('session')) continue;
+    const profile = path.join(SESSION_PATH, entry.name);
+    const lock = path.join(profile, 'SingletonLock');
+
+    let owner = null;               // "<hostname>-<pid>", when we can read it
+    try {
+      owner = fs.readlinkSync(lock);
+    } catch (e) {
+      if (e.code === 'ENOENT') continue;             // nothing to clear
+      owner = '';                                    // present but not a symlink
+    }
+
+    if (owner) {
+      const split = owner.lastIndexOf('-');
+      const host = split > 0 ? owner.slice(0, split) : owner;
+      const pid  = Number(owner.slice(split + 1));
+
+      if (host === os.hostname() && Number.isInteger(pid) && pid > 0) {
+        // Same machine: the only case where the holder could still be alive.
+        let alive = false;
+        try { process.kill(pid, 0); alive = true; } catch { alive = false; }
+        if (alive) {
+          log(`profile ${entry.name} is genuinely in use by pid ${pid} — leaving its lock alone`);
+          continue;
+        }
+      }
+    }
+
+    for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+      try { fs.rmSync(path.join(profile, name), { force: true, recursive: true }); }
+      catch (e) { log(`could not clear ${name}:`, e.message); }
+    }
+    log(`cleared a stale Chromium lock on ${entry.name}` + (owner ? ` (left by ${owner})` : ''));
+  }
+}
+
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 const dashboard = startDashboard({
   port: DASH_PORT,
@@ -473,6 +537,7 @@ const dashboard = startDashboard({
 });
 
 // ─── Go ──────────────────────────────────────────────────────────────────────
+clearStaleProfileLock();
 log('starting owner WhatsApp client…');
 client.initialize().catch((e) => {
   console.error('[owner] init error:', e.message);

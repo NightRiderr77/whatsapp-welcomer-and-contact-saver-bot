@@ -161,3 +161,11 @@ Bugs fixed on the way across:
   settings file is now fatal at startup instead of silent.
 - Unread history replayed at link time was treated as new traffic, so old
   answered chats got chased. Anything older than the process start is ignored.
+- Chromium stamps `<hostname>-<pid>` into a `SingletonLock` in the profile and
+  refuses to open a profile it thinks another Chromium holds. A container's
+  hostname is a new random id on every rebuild, so every rebuild inherited a
+  lock naming a machine that no longer existed — `Failed to launch the browser
+  process: Code: 21`, forever, behind a restart policy. The hostname is now
+  pinned in `docker-compose.yml`, and a lock is cleared at startup when it is
+  provably dead (different machine, or same machine with a dead pid). A lock
+  whose owner is still running is left alone.
