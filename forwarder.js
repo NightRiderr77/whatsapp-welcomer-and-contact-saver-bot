@@ -137,32 +137,74 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
     return groupCache;
   }
 
-  /** What the template group holds, oldest first. */
+  /**
+   * What the template group holds, oldest first — as ids, not objects.
+   *
+   * `client.getChatById()` cannot be used, for the same reason `getChats()`
+   * could not be: both go through the library's chat serialiser, and on this
+   * WhatsApp Web that serialiser throws. It reported
+   * `could not open the group (r)` on a group that was plainly there.
+   *
+   * The page is asked for the raw chat instead — `getAsModel: false`, the same
+   * path the library's own fetchMessages uses — and only the handful of fields
+   * needed to decide what to send. Ids are enough, because forwarding takes an
+   * id too.
+   */
   async function templateMessages(group, limit) {
     if (templateCache && Date.now() - templateCache.at < TEMPLATE_TTL) {
       return templateCache.messages;
     }
-    let chat, raw;
+
+    let raw;
     try {
-      chat = await client.getChatById(group.id);
-      if (!chat) throw new Error('the group could not be opened');
+      raw = await client.pupPage.evaluate(async (chatId) => {
+        const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
+        if (!chat || !chat.msgs) return null;
+        return chat.msgs.getModelsArray()
+          .filter((m) => m && m.id && !m.isNotification)
+          .map((m) => ({
+            id: m.id._serialized,
+            fromMe: !!m.id.fromMe,
+            text: m.body || m.caption || '',
+            // How the library itself decides a message carries media.
+            hasMedia: Boolean(m.mediaKey && m.directPath),
+            t: m.t || 0,
+          }));
+      }, group.id);
     } catch (e) {
-      // A stored id can go stale if the group was left or deleted.
+      throw new Error(`could not read the group (${e.message || e}).`);
+    }
+
+    if (raw === null) {
+      // The stored id no longer resolves — the group was left, or renamed away.
       groupCache = null;
       if (rememberGroup) rememberGroup('', '');
-      throw new Error(`could not open the group (${e.message || e}). Try once more.`);
+      throw new Error('that group could not be opened. Trying again will look it up afresh.');
     }
-    try {
-      raw = await chat.fetchMessages({ limit });
-    } catch (e) {
-      throw new Error(`could not read the group's messages (${e.message || e}).`);
-    }
+
     const messages = raw
       // Only what the owner put there, and only if it carries something.
-      .filter((m) => m.fromMe && (m.body || m.hasMedia))
-      .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      .filter((m) => m.fromMe && (m.text || m.hasMedia))
+      .sort((a, b) => a.t - b.t)
+      .slice(-limit);
+
     templateCache = { messages, at: Date.now() };
     return messages;
+  }
+
+  /**
+   * Forward one message by id.
+   *
+   * This is what `Message.forward()` does internally, minus building a Message
+   * object first — and building one means serialising a chat, which is the
+   * thing that does not work here.
+   */
+  async function forwardById(msgId, toChatId) {
+    return client.pupPage.evaluate(
+      (chatId, id) => window.WWebJS.forwardMessage(chatId, id),
+      toChatId,
+      msgId,
+    );
   }
 
   /**
@@ -205,12 +247,16 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
         return { ok: false, reason: 'template empty' };
       }
 
+      /* Marked before the first send, not after: the messages we forward come
+         back as our own outgoing messages, and one of them matching the
+         trigger must not start the whole thing again. */
+      lastSentTo.set(chatId, Date.now());
+
       let sent = 0;
       let lastError = null;
       for (const m of messages) {
         try {
-          const out = await m.forward(chatId);
-          if (onSent) onSent(out);
+          await forwardById(m.id, chatId);
           sent++;
         } catch (e) {
           // One bad message must not abandon the rest of the sequence — but if
@@ -227,7 +273,6 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
         return { ok: false, reason: lastError || 'nothing sent' };
       }
 
-      lastSentTo.set(chatId, Date.now());
       if (lastSentTo.size > 500) {
         for (const [k, v] of lastSentTo) if (Date.now() - v > REPEAT_GUARD_MS) lastSentTo.delete(k);
       }
