@@ -1,5 +1,7 @@
 'use strict';
 
+const { MessageMedia } = require('whatsapp-web.js');
+
 /**
  * Preset broadcast: the owner types one short phrase to a customer, and the
  * whole contents of a template group go out to them.
@@ -47,6 +49,10 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
   let templateCache = null;            // { messages, at }
   const busy = new Set();              // chats mid-broadcast
   const lastSentTo = new Map();        // chatId -> when, to swallow double-taps
+  /* Once forwarding has failed on this account it will keep failing — it is a
+     WhatsApp capability, not a per-message accident. Remembering that saves
+     one dead round trip per message for the rest of the run. */
+  let forwardingWorks = true;
 
   const GROUP_TTL = 10 * 60_000;
   const TEMPLATE_TTL = 5 * 60_000;
@@ -245,6 +251,57 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
   }
 
   /**
+   * The media on a message, fetched by id.
+   *
+   * `client.getMessageById()` cannot be used: it runs the message through the
+   * library's message model, and that model throws on this account — the video
+   * in the template came back as
+   * `Cannot read properties of undefined (reading 'split')` while five plain
+   * text messages went out fine.
+   *
+   * This is the same download the library performs, addressed by id and
+   * stopping short of modelling anything.
+   */
+  async function mediaOf(msgId) {
+    const result = await client.pupPage.evaluate(async (id) => {
+      const Coll = window.require('WAWebCollections');
+      const msg = Coll.Msg.get(id) || (await Coll.Msg.getMessagesById([id]))?.messages?.[0];
+
+      // REUPLOADING means the media has expired and is being fetched again.
+      if (!msg || !msg.mediaData || msg.mediaData.mediaStage === 'REUPLOADING') return null;
+
+      if (msg.mediaData.mediaStage !== 'RESOLVED') {
+        await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
+      }
+      if (msg.mediaData.mediaStage.includes('ERROR') || msg.mediaData.mediaStage === 'FETCHING') {
+        return null;
+      }
+
+      // The library passes a stand-in for its performance logger; without it
+      // the download manager throws on a missing argument.
+      const mockQpl = { addAnnotations() { return this; }, addPoint() { return this; } };
+      const decrypted = await window.require('WAWebDownloadManager')
+        .downloadManager.downloadAndMaybeDecrypt({
+          directPath: msg.directPath, encFilehash: msg.encFilehash,
+          filehash: msg.filehash, mediaKey: msg.mediaKey,
+          mediaKeyTimestamp: msg.mediaKeyTimestamp, type: msg.type,
+          signal: new AbortController().signal, downloadQpl: mockQpl,
+        });
+
+      const toB64 = window.WWebJS.arrayBufferToBase64Async || window.WWebJS.arrayBufferToBase64;
+      return {
+        data: await toB64(decrypted),
+        mimetype: msg.mimetype,
+        filename: msg.filename,
+        filesize: msg.size,
+      };
+    }, msgId);
+
+    if (!result || !result.data) return null;
+    return new MessageMedia(result.mimetype, result.data, result.filename, result.filesize);
+  }
+
+  /**
    * Send the same content as a new message.
    *
    * The fallback for when forwarding is unavailable — which, on a WhatsApp Web
@@ -255,15 +312,14 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
    */
   async function resendOne(m, toChatId) {
     if (m.hasMedia) {
-      const full = await client.getMessageById(m.id);
-      const media = full && await full.downloadMedia();
+      const media = await mediaOf(m.id);
       if (media) {
         return client.sendMessage(toChatId, media, { caption: m.text || undefined });
       }
       // Media that cannot be fetched still has its caption worth sending.
     }
     if (m.text) return client.sendMessage(toChatId, m.text);
-    throw new Error('nothing left to send');
+    throw new Error('the media could not be fetched and there was no caption to send instead');
   }
 
   /**
@@ -316,10 +372,12 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
       let lastError = null;
       for (const m of messages) {
         try {
+          if (!forwardingWorks) throw new Error('forwarding is unavailable on this account');
           await forwardById(m.id, chatId);
           sent++;
         } catch (e) {
           const why = e.message || String(e);
+          forwardingWorks = false;
           try {
             /* Forwarding is a WhatsApp feature and it can be unavailable to us;
                the content is ours either way. Better a message without the
