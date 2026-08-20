@@ -509,7 +509,10 @@ client.on('message_create', async (msg) => {
   if (!forwarder.isTrigger(msg.body)) return;
   try {
     const r = await forwarder.broadcastTo(msg.to);
-    if (r.ok) note(`sent the "${loadSettings().forward.group}" template to ${msg.to.replace(/@c\.us$/, '')} (${r.sent}/${r.of} messages)`);
+    if (r.ok) {
+      const how = r.resent ? ` (${r.resent} sent as new messages — forwarding was unavailable)` : '';
+      note(`sent the "${loadSettings().forward.group}" template to ${msg.to.replace(/@c\.us$/, '')} (${r.sent}/${r.of} messages)${how}`);
+    }
   } catch (e) {
     note(`broadcast failed: ${e.message}`);
   }

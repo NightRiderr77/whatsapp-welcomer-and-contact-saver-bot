@@ -215,18 +215,55 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
   }
 
   /**
-   * Forward one message by id.
+   * Forward one message by id, saying which step failed when one does.
    *
    * This is what `Message.forward()` does internally, minus building a Message
-   * object first — and building one means serialising a chat, which is the
-   * thing that does not work here.
+   * object first — building one means serialising a chat, and that is the step
+   * that does not work here. Written out rather than called so that a failure
+   * names itself: the library's version surfaces every one of these as the same
+   * bare minified letter.
    */
   async function forwardById(msgId, toChatId) {
-    return client.pupPage.evaluate(
-      (chatId, id) => window.WWebJS.forwardMessage(chatId, id),
-      toChatId,
-      msgId,
-    );
+    return client.pupPage.evaluate(async (chatId, id) => {
+      const Coll = window.require('WAWebCollections');
+      const msg = Coll.Msg.get(id) ||
+        (await Coll.Msg.getMessagesById([id]))?.messages?.[0];
+      if (!msg) throw new Error('the message is no longer in the page');
+
+      const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
+      if (!chat) throw new Error('the destination chat could not be opened');
+
+      try {
+        return await window.require('WAWebChatForwardMessage').forwardMessages({
+          chat, msgs: [msg], multicast: true, includeCaption: true,
+          appendedText: undefined,
+        });
+      } catch (e) {
+        throw new Error('the forward call itself failed: ' + (e && e.message ? e.message : e));
+      }
+    }, toChatId, msgId);
+  }
+
+  /**
+   * Send the same content as a new message.
+   *
+   * The fallback for when forwarding is unavailable — which, on a WhatsApp Web
+   * newer than the library, it can be. Ordinary sending demonstrably still
+   * works (it is how the welcome message goes out), so the customer gets the
+   * price list either way. The only visible difference is the absence of the
+   * "forwarded" tag.
+   */
+  async function resendOne(m, toChatId) {
+    if (m.hasMedia) {
+      const full = await client.getMessageById(m.id);
+      const media = full && await full.downloadMedia();
+      if (media) {
+        return client.sendMessage(toChatId, media, { caption: m.text || undefined });
+      }
+      // Media that cannot be fetched still has its caption worth sending.
+    }
+    if (m.text) return client.sendMessage(toChatId, m.text);
+    throw new Error('nothing left to send');
   }
 
   /**
@@ -275,16 +312,28 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
       lastSentTo.set(chatId, Date.now());
 
       let sent = 0;
+      let resent = 0;
       let lastError = null;
       for (const m of messages) {
         try {
           await forwardById(m.id, chatId);
           sent++;
         } catch (e) {
-          // One bad message must not abandon the rest of the sequence — but if
-          // every one fails, that is not a success with a low count.
-          lastError = e.message || String(e);
-          log('one broadcast message failed:', lastError);
+          const why = e.message || String(e);
+          try {
+            /* Forwarding is a WhatsApp feature and it can be unavailable to us;
+               the content is ours either way. Better a message without the
+               "forwarded" tag than a customer with no price list. */
+            await resendOne(m, chatId);
+            sent++;
+            resent++;
+            if (resent === 1) log('forwarding unavailable, sending the content instead:', why);
+          } catch (e2) {
+            // One bad message must not abandon the rest of the sequence — but
+            // if every one fails, that is not a success with a low count.
+            lastError = `forward: ${why} / send: ${e2.message || e2}`;
+            log('one broadcast message failed:', lastError);
+          }
         }
         // WhatsApp throttles bursts and will drop messages sent too fast.
         await new Promise((r) => setTimeout(r, Number(s.gapMs) || DEFAULTS.gapMs));
@@ -298,7 +347,7 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
       if (lastSentTo.size > 500) {
         for (const [k, v] of lastSentTo) if (Date.now() - v > REPEAT_GUARD_MS) lastSentTo.delete(k);
       }
-      return { ok: true, sent, of: messages.length };
+      return { ok: true, sent, of: messages.length, resent };
     } finally {
       busy.delete(chatId);
     }
