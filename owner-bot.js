@@ -10,27 +10,46 @@
  *   2. Sends the group invite once, on their first ever message.
  *   3. Chases a customer you haven't replied to within N minutes.
  *
- * It is deliberately not the AI agent. No model, no Supabase, no dashboard, no
- * HTTP server. Configuration is `settings.json`, re-read on every message, so
- * editing that file takes effect immediately with no restart — that is what
- * replaces the dashboard the old build had.
+ * It is deliberately not the AI agent: no model, no prompt, no Supabase.
+ *
+ * Settings live in state/settings.json and are re-read on every message, so a
+ * change applies immediately with no restart. The dashboard (dashboard.js) is
+ * a view onto that same file — anything it can do, editing the file by hand
+ * can do too.
  *
  *   Start:  node owner-bot.js
  *   Login:  scan the QR printed in the log, or set PAIR_NUMBER=<owner number>
  *           to link with an 8-digit code instead.
+ *   Panel:  http://<host>:8091, requires DASH_PASSWORD to be set.
  */
 
 const path   = require('path');
 const fs     = require('fs');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
+const { startDashboard } = require('./dashboard');
 
 const SESSION_PATH  = process.env.WWEBJS_PATH   || path.join(__dirname, '.wwebjs_auth');
 const STATE_DIR     = process.env.STATE_DIR     || path.join(__dirname, 'state');
 const QR_FILE       = path.join(__dirname, 'qr.png');
 const PAIR_NUMBER   = String(process.env.PAIR_NUMBER || '').replace(/\D/g, '');
 
+const DASH_PORT     = Number(process.env.DASH_PORT || 8091);
+const DASH_HOST     = process.env.DASH_HOST || '0.0.0.0';
+const DASH_PASSWORD = process.env.DASH_PASSWORD || '';
+
 const log = (...a) => console.log(`[${new Date().toISOString()}] [owner]`, ...a);
+
+/* The last few things the bot did, for the dashboard. A ring buffer, because
+   this process is meant to run for months and nobody is reading past the top
+   of the list anyway. */
+const ACTIVITY_MAX = 40;
+const activity = [];
+function note(text) {
+  activity.unshift({ ts: Date.now(), text });
+  if (activity.length > ACTIVITY_MAX) activity.length = ACTIVITY_MAX;
+  log(text);
+}
 
 /**
  * Anything that arrived before we connected is history, not news.
@@ -88,7 +107,13 @@ const DEFAULTS = {
  * minute rather than per message, because this is called on every message.
  */
 let _lastSettingsComplaint = 0;
+/* Surfaced at the top of the dashboard. The whole point of showing it there is
+   that the last time this went wrong, nothing said so. */
+const settingsHealth = { ok: true, error: null };
+
 function complain(msg) {
+  settingsHealth.ok = false;
+  settingsHealth.error = msg;
   const now = Date.now();
   if (now - _lastSettingsComplaint < 60_000) return;
   _lastSettingsComplaint = now;
@@ -106,6 +131,8 @@ function loadSettings() {
   }
   try {
     const raw = JSON.parse(text);
+    settingsHealth.ok = true;
+    settingsHealth.error = null;
     // A shallow merge would wipe half of a nested block when the file sets only
     // one field of it, so the two nested blocks are merged in their own right.
     return {
@@ -338,10 +365,10 @@ client.on('message', async (msg) => {
           await client.saveOrEditAddressbookContact(number, 'Cus ' + n, '', true);
           remember(saved, SAVED_FILE, chatId);
           patchSettings({ contactNextNumber: n + 1 });
-          log(`saved ${name} as "Cus ${n}"`);
+          note(`saved ${name} as "Cus ${n}"`);
         } catch (e) {
           // Left unsaved on purpose, so the next message retries.
-          log('contact save failed:', e.message);
+          note(`could not save ${name} to contacts: ${e.message}`);
         }
       } else {
         // Hidden number: there is nothing to save and there never will be.
@@ -355,9 +382,9 @@ client.on('message', async (msg) => {
       remember(greeted, GREETED_FILE, chatId);
       try {
         await send(chatId, s.invite.message);
-        log(`invite sent to ${name}`);
+        note(`invite sent to ${name}`);
       } catch (e) {
-        log('invite send failed:', e.message);
+        note(`invite to ${name} failed: ${e.message}`);
       }
     }
   } catch (e) {
@@ -412,12 +439,38 @@ setInterval(async () => {
     info.ts = now;
     try {
       await send(chatId, s.noReply.message);
-      log(`no-reply message sent to ${info.name}`);
+      note(`no-reply message sent to ${info.name}`);
     } catch (e) {
-      log('no-reply send failed:', e.message);
+      note(`no-reply to ${info.name} failed: ${e.message}`);
     }
   }
 }, SWEEP_MS);
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+const dashboard = startDashboard({
+  port: DASH_PORT,
+  host: DASH_HOST,
+  password: DASH_PASSWORD,
+  readSettings: loadSettings,
+  writeSettings: (next) => patchSettings(next),
+  log,
+  status: () => {
+    const s = loadSettings();
+    return {
+      // `client.info` is only populated once WhatsApp has actually linked.
+      ready            : client.info != null,
+      settingsOk       : settingsHealth.ok,
+      settingsError    : settingsHealth.error,
+      settingsFile     : SETTINGS_FILE,
+      contactNextNumber: s.contactNextNumber,
+      saved            : saved.size,
+      greeted          : greeted.size,
+      // Only those still owed a reply; the chased ones linger for a day.
+      pending          : [...pending.values()].filter((p) => !p.notified).length,
+      activity,
+    };
+  },
+});
 
 // ─── Go ──────────────────────────────────────────────────────────────────────
 log('starting owner WhatsApp client…');
@@ -429,6 +482,7 @@ client.initialize().catch((e) => {
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, async () => {
     log(sig, '— shutting down');
+    if (dashboard) dashboard.close();
     await client.destroy().catch(() => {});
     process.exit(0);
   });

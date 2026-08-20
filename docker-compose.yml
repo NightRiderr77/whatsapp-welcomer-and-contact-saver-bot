@@ -11,7 +11,14 @@ services:
       # The bot is light, but Chromium is not — cap Node's heap so the two
       # together stay inside a small VPS.
       - NODE_OPTIONS=--max-old-space-size=256
+      # REQUIRED for the dashboard. Without it the panel does not start at all
+      # — it listens on a public port, so "no password" would mean "no lock".
+      - DASH_PASSWORD=${DASH_PASSWORD:?set DASH_PASSWORD in .env before starting}
       # - PAIR_NUMBER=947XXXXXXXX   # link with an 8-digit code instead of a QR
+    ports:
+      # The owner panel. Change the left-hand side to 127.0.0.1:8091 to keep it
+      # off the internet and reach it over an SSH tunnel instead.
+      - "8091:8091"
     volumes:
       # The WhatsApp login. Delete this to force a fresh QR.
       - ./.wwebjs_auth:/app/.wwebjs_auth

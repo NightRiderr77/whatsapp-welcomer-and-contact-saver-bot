@@ -8,8 +8,9 @@ nothing else:
 2. **Sends the group invite once**, on someone's first ever message.
 3. **Chases a customer you haven't replied to** after N minutes.
 
-It is not the AI agent and shares nothing with it: no model, no Supabase, no
-database, no dashboard, no HTTP server. One file, two dependencies.
+It is not the AI agent and shares nothing with it: no model, no prompt, no
+Supabase, no database. Two files, two dependencies, and a password-protected
+panel for changing its mind.
 
 ---
 
@@ -32,9 +33,12 @@ Docker:
 
 ```bash
 mkdir -p state && cp settings.example.json state/settings.json
+cp .env.example .env && nano .env         # set DASH_PASSWORD
 docker compose up -d --build
 docker compose logs -f                    # scan the QR here
 ```
+
+The panel is then on `http://<your-vps>:8091`.
 
 PM2:
 
@@ -47,8 +51,8 @@ pm2 start ecosystem.config.js && pm2 save
 ## Configuration
 
 Everything lives in **`state/settings.json`**, which is re-read on every message —
-**edit it and the change applies immediately, no restart.** That is what
-replaces the old dashboard.
+**a change applies immediately, no restart.** Edit it from the dashboard, or by
+hand with `nano`; they are the same file and neither one wins.
 
 | Key | What it does |
 |---|---|
@@ -85,6 +89,9 @@ hundred old chats at once.
 | `WWEBJS_PATH` | `./.wwebjs_auth` | Where the WhatsApp session is kept. |
 | `STATE_DIR` | `./state` | Where "already greeted / already saved" is kept. |
 | `SETTINGS_FILE` | `<STATE_DIR>/settings.json` | Config location. |
+| `DASH_PASSWORD` | — | **Required for the dashboard.** No password, no panel. |
+| `DASH_PORT` | `8091` | Panel port. |
+| `DASH_HOST` | `0.0.0.0` | Bind address. `127.0.0.1` to require an SSH tunnel. |
 
 ---
 
@@ -113,18 +120,44 @@ docker compose stop pxn-owner       # in the old agent folder
 
 ---
 
+## The dashboard
+
+`http://<your-vps>:8091`. It shows, in this order:
+
+1. **Whether the settings file is actually being read.** A red banner with the
+   path and the reason when it isn't. This is first because the alternative is
+   what happened in production: the bot ran on defaults for a day, saved every
+   customer as "Cus 1", and nothing anywhere said so.
+2. **Next number, saved, greeted, waiting** — a counter stuck at 1 is now
+   something you can see rather than something you deduce from your contacts.
+3. Every setting, editable.
+4. The last 40 things it did.
+
+A **password is required**: with no `DASH_PASSWORD` the panel does not start and
+the bot logs why. The old build made auth optional, which on a public port means
+off. Sessions are random tokens (not a hash of the password, which never
+rotated), expire after 12 hours, and five wrong guesses locks logins for 15
+minutes.
+
+To keep it off the internet entirely, publish it on loopback in
+`docker-compose.yml` — `"127.0.0.1:8091:8091"` — and reach it through
+`ssh -L 8091:127.0.0.1:8091 <your-vps>`.
+
 ## What was dropped, and why
 
-- **The dashboard** (`:8091`) — an unauthenticated-by-default HTTP server
-  exposed on the VPS just to toggle three booleans. `settings.json` does the
-  same job with nothing listening on a port.
 - **Everything AI** — the model, the prompt, the escalations, the learned Q&A,
   the Supabase sync. That's the agent, and it isn't this.
 
-Two real bugs were fixed on the way across:
+Bugs fixed on the way across:
 
 - The "who has already been greeted" list was re-read from disk on **every
   incoming message**, and rewritten whole on every new contact. It's now loaded
   once and kept in memory.
 - The pending-reply map never dropped anyone it had already chased, so it grew
   for the life of the process. Chased chats are now forgotten after a day.
+- `settings.json` was bind-mounted as a single *file*. Docker creates a
+  directory when the source is missing, every read failed, and the failure was
+  swallowed. Config moved into the `state/` directory mount, and an unreadable
+  settings file is now fatal at startup instead of silent.
+- Unread history replayed at link time was treated as new traffic, so old
+  answered chats got chased. Anything older than the process start is ignored.

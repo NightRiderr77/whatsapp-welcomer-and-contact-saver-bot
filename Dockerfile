@@ -14,7 +14,9 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
 
-COPY owner-bot.js settings.example.json ./
+COPY owner-bot.js dashboard.js settings.example.json ./
+
+EXPOSE 8091
 
 # The session and the state files must outlive the container, or every deploy
 # asks the owner to scan a QR again and re-greets every customer. See the
