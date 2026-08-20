@@ -14,7 +14,11 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
 
-COPY owner-bot.js dashboard.js settings.example.json ./
+# Every .js in the project, not a hand-written list. Listing them by name meant
+# that adding forwarder.js and brand.js built an image that was missing them,
+# and the failure only appeared at runtime as "Cannot find module './forwarder'".
+# .dockerignore already keeps node_modules, the session and the state out.
+COPY *.js settings.example.json ./
 
 EXPOSE 8091
 

@@ -7,7 +7,8 @@
   "homepage": "https://pxnstores.lk",
   "private": true,
   "scripts": {
-    "start": "node owner-bot.js"
+    "start": "node owner-bot.js",
+    "test": "node tools/check-image.js"
   },
   "engines": {
     "node": ">=18"
