@@ -57,31 +57,58 @@ function createForwarder({ client, loadSettings, note, log, onSent }) {
     return { ...DEFAULTS, ...(s.forward || {}) };
   };
 
-  /** The template group, found once and remembered. */
+  /**
+   * The template group, found once and remembered.
+   *
+   * Every call below runs inside the WhatsApp page, so when one fails it fails
+   * with the page's own minified message — a bare "r" tells nobody anything.
+   * Each step therefore names itself, because the first time this broke the
+   * only evidence was `broadcast failed: r`.
+   */
   async function findGroup(name) {
     const wanted = normalise(name);
     if (groupCache && groupCache.name === wanted && Date.now() - groupCache.at < GROUP_TTL) {
-      return groupCache.id;
+      return groupCache;
     }
-    // The one expensive call, and only when the trigger is actually used.
-    const chats = await client.getChats();
-    const hit = chats.find((ch) => ch.isGroup && normalise(ch.name) === wanted);
+
+    let chats;
+    try {
+      // The one expensive call, and only when the trigger is actually used.
+      chats = await client.getChats();
+    } catch (e) {
+      throw new Error(`could not list your chats (${e.message || e}). WhatsApp may still be loading — try again in a minute.`);
+    }
+
+    const groups = chats.filter((ch) => ch.isGroup);
+    const hit = groups.find((ch) => normalise(ch.name) === wanted);
     if (!hit) {
       groupCache = null;
-      return null;
+      const names = groups.map((g) => g.name).filter(Boolean).slice(0, 8);
+      throw new Error(
+        `no group called "${name}". ` +
+        (names.length ? `Your groups: ${names.join(', ')}` : 'You are not in any groups.'),
+      );
     }
-    groupCache = { id: hit.id._serialized, name: wanted, at: Date.now() };
+
+    groupCache = { id: hit.id._serialized, chat: hit, name: wanted, at: Date.now() };
     templateCache = null;              // a different group means a new template
-    return groupCache.id;
+    return groupCache;
   }
 
   /** What the template group holds, oldest first. */
-  async function templateMessages(groupId, limit) {
+  async function templateMessages(group, limit) {
     if (templateCache && Date.now() - templateCache.at < TEMPLATE_TTL) {
       return templateCache.messages;
     }
-    const chat = await client.getChatById(groupId);
-    const raw = await chat.fetchMessages({ limit });
+    let raw;
+    try {
+      // The Chat object from getChats() already knows how to do this; asking
+      // the client for the chat again is a second trip and a second thing that
+      // can fail.
+      raw = await group.chat.fetchMessages({ limit });
+    } catch (e) {
+      throw new Error(`could not read the "${group.name}" group (${e.message || e}).`);
+    }
     const messages = raw
       // Only what the owner put there, and only if it carries something.
       .filter((m) => m.fromMe && (m.body || m.hasMedia))
@@ -116,30 +143,40 @@ function createForwarder({ client, loadSettings, note, log, onSent }) {
 
     busy.add(chatId);
     try {
-      const groupId = await findGroup(s.group);
-      if (!groupId) {
-        note(`Broadcast failed: no group named "${s.group}". Create it, or change the name in the dashboard.`);
-        return { ok: false, reason: 'group not found' };
+      let group, messages;
+      try {
+        group = await findGroup(s.group);
+        messages = await templateMessages(group, Number(s.limit) || DEFAULTS.limit);
+      } catch (e) {
+        note(`Broadcast failed: ${e.message}`);
+        return { ok: false, reason: e.message };
       }
 
-      const messages = await templateMessages(groupId, Number(s.limit) || DEFAULTS.limit);
       if (!messages.length) {
-        note(`Broadcast failed: the group "${s.group}" has nothing in it to send.`);
+        note(`Broadcast failed: you have not posted anything in "${s.group}" yet. Only messages you sent there are forwarded.`);
         return { ok: false, reason: 'template empty' };
       }
 
       let sent = 0;
+      let lastError = null;
       for (const m of messages) {
         try {
           const out = await m.forward(chatId);
           if (onSent) onSent(out);
           sent++;
         } catch (e) {
-          // One bad message must not abandon the rest of the sequence.
-          log('one broadcast message failed:', e.message);
+          // One bad message must not abandon the rest of the sequence — but if
+          // every one fails, that is not a success with a low count.
+          lastError = e.message || String(e);
+          log('one broadcast message failed:', lastError);
         }
         // WhatsApp throttles bursts and will drop messages sent too fast.
         await new Promise((r) => setTimeout(r, Number(s.gapMs) || DEFAULTS.gapMs));
+      }
+
+      if (!sent) {
+        note(`Broadcast failed: none of the ${messages.length} messages could be forwarded (${lastError}).`);
+        return { ok: false, reason: lastError || 'nothing sent' };
       }
 
       lastSentTo.set(chatId, Date.now());

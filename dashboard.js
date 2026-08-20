@@ -160,7 +160,12 @@ const PAGE = String.raw`<!doctype html>
     padding:10px 22px;font:600 13.5px system-ui,sans-serif;cursor:pointer}
   button:disabled{opacity:.5;cursor:default}
   .saved{color:var(--ok);font-size:12.5px}
-  ul{list-style:none;margin:0;padding:0}
+  /* Its own scroll box: 40 entries stretched the page far past the save bar,
+     so the button you came for scrolled off the bottom. */
+  ul{list-style:none;margin:0;padding:0;max-height:300px;overflow-y:auto;
+     overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+  ul::-webkit-scrollbar{width:6px}
+  ul::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
   li{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12.5px}
   li:last-child{border-bottom:0}
   li time{font:11px/1.6 var(--mono);color:var(--muted);flex:none}
@@ -309,7 +314,8 @@ function paintStatus(st) {
   }
   // Built as nodes, never as markup: an activity line carries a customer's
   // WhatsApp display name, which is theirs to choose and could be anything.
-  ul.replaceChildren(...st.activity.map(a => {
+  // Kept: 40. Shown: 12 — the rest is history nobody scrolls a phone for.
+  ul.replaceChildren(...st.activity.slice(0, 12).map(a => {
     const li = document.createElement('li');
     const t  = document.createElement('time');
     t.textContent = new Date(a.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

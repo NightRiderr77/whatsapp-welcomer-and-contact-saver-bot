@@ -372,6 +372,73 @@ async function send(chatId, text) {
 /** Customers waiting on the owner: chatId -> { ts, name, notified }. */
 const pending = new Map();
 
+/**
+ * Give a new customer a name in the address book.
+ *
+ * Three rules, each of them learned the hard way on a live account:
+ *
+ *   • **Never touch a contact that is already saved.** `isMyContact` is true
+ *     for anyone in the phone's address book, whatever they are called. The
+ *     first version only checked its own list, so a customer saved months ago
+ *     as "Cus 1431" — or as a real person's name — was renamed to "Cus 2".
+ *     A name the owner chose is not ours to overwrite.
+ *
+ *   • **One at a time.** The counter is a read-modify-write against a file, and
+ *     WhatsApp delivers bursts. Ten messages arriving together all read
+ *     `contactNextNumber: 2` before any of them wrote 3, and ten people were
+ *     saved as "Cus 2". Every save now waits for the one before it.
+ *
+ *   • **One save per chat.** Marked in flight before the first await, because a
+ *     customer sending three messages in a second produced three saves.
+ */
+const savingNow = new Set();
+let saveQueue = Promise.resolve();
+
+function serialised(fn) {
+  const run = saveQueue.then(fn, fn);
+  saveQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function saveContact(chatId, contact, name) {
+  if (saved.has(chatId) || savingNow.has(chatId)) return;
+  savingNow.add(chatId);
+  try {
+    await serialised(async () => {
+      if (saved.has(chatId)) return;              // settled while we queued
+
+      // Already in the phone's address book, under any name at all. Remember
+      // it so we never ask again, and leave the name alone.
+      if (contact && contact.isMyContact) {
+        remember(saved, SAVED_FILE, chatId);
+        log(`${name} is already in your contacts — left as is`);
+        return;
+      }
+
+      const number = await resolvePhoneNumber(chatId);
+      if (!number) {
+        // Hidden number: there is nothing to save and there never will be.
+        remember(saved, SAVED_FILE, chatId);
+        return;
+      }
+
+      // Read the counter inside the lock, so no two saves can see the same one.
+      const n = Number(loadSettings().contactNextNumber) || 1;
+      try {
+        await client.saveOrEditAddressbookContact(number, 'Cus ' + n, '', true);
+        remember(saved, SAVED_FILE, chatId);
+        patchSettings({ contactNextNumber: n + 1 });
+        note(`saved ${name} as "Cus ${n}"`);
+      } catch (e) {
+        // Left unsaved on purpose, so the next message retries.
+        note(`could not save ${name} to contacts: ${e.message}`);
+      }
+    });
+  } finally {
+    savingNow.delete(chatId);
+  }
+}
+
 // ─── 1 + 2. Save the contact, send the invite ────────────────────────────────
 client.on('message', async (msg) => {
   try {
@@ -402,24 +469,7 @@ client.on('message', async (msg) => {
     if (!cur) pending.set(chatId, { ts: Date.now(), name, notified: false, isFirstContact });
     else if (!cur.notified) { cur.ts = Date.now(); cur.name = name; }
 
-    if (s.autoSaveContacts && !saved.has(chatId)) {
-      const n = Number(s.contactNextNumber) || 1;
-      const number = await resolvePhoneNumber(chatId);
-      if (number) {
-        try {
-          await client.saveOrEditAddressbookContact(number, 'Cus ' + n, '', true);
-          remember(saved, SAVED_FILE, chatId);
-          patchSettings({ contactNextNumber: n + 1 });
-          note(`saved ${name} as "Cus ${n}"`);
-        } catch (e) {
-          // Left unsaved on purpose, so the next message retries.
-          note(`could not save ${name} to contacts: ${e.message}`);
-        }
-      } else {
-        // Hidden number: there is nothing to save and there never will be.
-        remember(saved, SAVED_FILE, chatId);
-      }
-    }
+    if (s.autoSaveContacts) await saveContact(chatId, contact, name);
 
     if (s.invite.enabled && s.invite.message && !greeted.has(chatId)) {
       // Marked before sending: a send that half-succeeds must not invite them
