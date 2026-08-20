@@ -11,3 +11,6 @@ state/
 
 # Dashboard password.
 .env
+
+# Backups: a live WhatsApp login and the dashboard password.
+*.tar.gz

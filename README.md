@@ -95,28 +95,100 @@ hundred old chats at once.
 
 ---
 
-## Moving off the old combined repo
 
-The bot was `owner_bot.js` inside the AI agent repo. To move it without asking
-the owner to scan a QR again or re-greeting every existing customer:
+## Moving to another VPS
 
-```bash
-# from the old agent folder, onto the new one
-mkdir -p                            <new>/state
-cp -r .wwebjs_auth_owner            <new>/.wwebjs_auth
-cp    owner_settings.json           <new>/state/settings.json
-cp    owner_greeted.json            <new>/state/greeted.json
-cp    owner_saved_contacts.json     <new>/state/saved-contacts.json
-```
+Three things cannot be rebuilt and must travel: the **WhatsApp login** (or you
+scan a QR again), **settings.json** (including the customer counter — lose it
+and the next customer is `Cus 1`), and the **greeted / saved lists** (lose them
+and every existing customer is invited to the group a second time).
 
-The file names changed (they no longer need an `owner_` prefix — the whole repo
-is the owner bot), but the contents are the same shape.
+`backup.sh` packs all three plus your `.env`. `restore.sh` puts them back.
 
-Then stop the old one so two bots aren't on the same number:
+### On the old machine
 
 ```bash
-docker compose stop pxn-owner       # in the old agent folder
+cd ~/pxn-owner-bot && ./backup.sh
 ```
+
+It stops the bot first, on purpose: Chromium writes to the profile constantly
+and copying it live can capture a half-written session that restores as a
+logged-out one. It starts the bot again when it's done. Use `./backup.sh --live`
+only if you accept that risk.
+
+You get `pxn-owner-bot-backup-<date>.tar.gz`. Send it over:
+
+```bash
+scp pxn-owner-bot-backup-*.tar.gz ubuntu@<new-vps>:~/
+```
+
+> That file is a **live WhatsApp login and your dashboard password**. Treat it
+> like a password — move it, restore it, delete it. Never commit it; `*.tar.gz`
+> is git-ignored for that reason.
+
+### On the new machine
+
+Docker and the compose plugin first, if it's a bare box:
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER && newgrp docker
+```
+
+Get the code:
+
+```bash
+git clone https://github.com/NightRiderr77/pxn-owner-bot.git ~/pxn-owner-bot
+```
+
+Restore and start:
+
+```bash
+cd ~/pxn-owner-bot && mv ~/pxn-owner-bot-backup-*.tar.gz . && ./restore.sh pxn-owner-bot-backup-*.tar.gz
+```
+
+```bash
+docker compose up -d --build && docker compose logs -f
+```
+
+You want `cleared a stale Chromium lock` (the profile remembers the old
+machine — that is expected and handled) then `ready.` — **and no QR**. A QR
+means the session didn't come across.
+
+### Then
+
+```bash
+shred -u pxn-owner-bot-backup-*.tar.gz
+```
+
+And stop the old one, so two bots aren't on the same number:
+
+```bash
+cd ~/pxn-owner-bot && docker compose down     # on the OLD machine
+```
+
+Check the dashboard at `http://<new-vps>:8091` shows your real **Next no.**, not 1.
+
+### Requirements for the new box
+
+| | |
+|---|---|
+| RAM | **2 GB or more.** Chromium running WhatsApp Web wants roughly a gigabyte to itself. Do not put a `memory` limit on the container — the renderer gets killed, the page reloads, and WhatsApp eventually unlinks the device. |
+| Disk | ~2 GB for the image, Chromium and the profile. |
+| Ports | `8091` for the dashboard, if you want to reach it. |
+
+### If the repo is private
+
+`git clone` will ask for a username and password. GitHub stopped accepting
+account passwords — the "password" is a **personal access token**, created at
+*Settings → Developer settings → Personal access tokens → Fine-grained*, with
+**Contents: Read-only** on this repository.
+
+Type it at the prompt. Do not put it in this file, in a script, or in a clone
+URL: anything committed here is in the git history permanently, and a repo is
+the one place a credential must never live. If you want cloning to need no
+token at all, make the repository public — there are no secrets in it (the
+group link, the counter and the password live in `settings.json` and `.env`,
+both git-ignored).
 
 ---
 
