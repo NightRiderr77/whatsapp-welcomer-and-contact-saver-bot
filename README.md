@@ -111,6 +111,10 @@ and every existing customer is invited to the group a second time).
 cd ~/pxn-owner-bot && ./backup.sh
 ```
 
+Run it as the user that owns the folder — not `sudo -i`, where `~` is root's
+home and the folder isn't there. If you get `Permission denied`, the clone lost
+the executable bit; `bash backup.sh` works regardless, or `chmod +x *.sh` once.
+
 It stops the bot first, on purpose: Chromium writes to the profile constantly
 and copying it live can capture a half-written session that restores as a
 logged-out one. It starts the bot again when it's done. Use `./backup.sh --live`

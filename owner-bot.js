@@ -494,6 +494,29 @@ setInterval(async () => {
 // Clearing the lock is only safe when it is genuinely dead, so this checks
 // rather than assumes: a lock from a different machine cannot be live here, and
 // a lock from this machine is only cleared once its pid is gone.
+/**
+ * Is `pid` a Chromium that currently has `profile` open?
+ *
+ * Asked of /proc rather than of `process.kill(pid, 0)`, which only answers
+ * "does something with this number exist" — true far too often in a container,
+ * where pid numbering starts again at 1 for every run.
+ *
+ * Anything we cannot read counts as "no". This is called before our own
+ * browser starts, so a lock we cannot attribute to a running Chromium is one
+ * nobody is holding.
+ */
+function isChromiumUsing(pid, profile) {
+  let cmdline;
+  try {
+    cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+  } catch {
+    return false; // process gone, or no /proc (not Linux)
+  }
+  const args = cmdline.split('\0').join(' ');
+  if (!/chrome|chromium/i.test(args)) return false;
+  return args.includes(profile) || args.includes(path.basename(profile));
+}
+
 function clearStaleProfileLock() {
   let entries;
   try {
@@ -521,11 +544,18 @@ function clearStaleProfileLock() {
       const pid  = Number(owner.slice(split + 1));
 
       if (host === os.hostname() && Number.isInteger(pid) && pid > 0) {
-        // Same machine: the only case where the holder could still be alive.
-        let alive = false;
-        try { process.kill(pid, 0); alive = true; } catch { alive = false; }
-        if (alive) {
-          log(`profile ${entry.name} is genuinely in use by pid ${pid} — leaving its lock alone`);
+        /* Same machine, so the holder *could* still be alive — but "the pid
+           exists" is not the question, and inside a container it is a badly
+           misleading one. Pids restart from 1 in every new container, and the
+           hostname is now pinned, so a lock left by yesterday's container reads
+           as `pxn-owner-bot-14` and pid 14 in today's container is simply
+           whatever started fourteenth. That collision makes a dead lock look
+           held, and the bot then refuses to clear the very thing stopping it.
+
+           The real question is whether that pid is a Chromium holding *this*
+           profile. Nothing of ours can be: this runs before we launch one. */
+        if (isChromiumUsing(pid, profile)) {
+          log(`profile ${entry.name} really is open in pid ${pid} — leaving its lock alone`);
           continue;
         }
       }
