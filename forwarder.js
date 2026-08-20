@@ -253,51 +253,86 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
   /**
    * The media on a message, fetched by id.
    *
-   * `client.getMessageById()` cannot be used: it runs the message through the
-   * library's message model, and that model throws on this account — the video
-   * in the template came back as
-   * `Cannot read properties of undefined (reading 'split')` while five plain
-   * text messages went out fine.
+   * Every route into this library has failed on this account in turn — the
+   * chat list, the chat, the message model, the forward — each with the same
+   * single minified letter, and each fix has been too narrow by exactly one
+   * layer. So this stops guessing which internal still works and tries all of
+   * them, keeping what each one said when it did not.
    *
-   * This is the same download the library performs, addressed by id and
-   * stopping short of modelling anything.
+   * Two routes, cheapest first. WhatsApp usually still holds the decrypted
+   * blob on the message after a download; reading that costs nothing and
+   * avoids the network entirely. Failing that, the download manager, which is
+   * what the library itself calls.
+   *
+   * On failure the error names every route and its reason, so the next report
+   * is a map rather than a letter.
    */
   async function mediaOf(msgId) {
     const result = await client.pupPage.evaluate(async (id) => {
-      const Coll = window.require('WAWebCollections');
-      const msg = Coll.Msg.get(id) || (await Coll.Msg.getMessagesById([id]))?.messages?.[0];
+      const problems = [];
+      const say = (where, e) => problems.push(`${where}: ${(e && e.message) || e}`);
 
-      // REUPLOADING means the media has expired and is being fetched again.
-      if (!msg || !msg.mediaData || msg.mediaData.mediaStage === 'REUPLOADING') return null;
+      let msg;
+      try {
+        const Coll = window.require('WAWebCollections');
+        msg = Coll.Msg.get(id) || (await Coll.Msg.getMessagesById([id]))?.messages?.[0];
+      } catch (e) { say('finding the message', e); }
+      if (!msg) return { error: problems.join('; ') || 'the message is not in the page' };
 
-      if (msg.mediaData.mediaStage !== 'RESOLVED') {
-        await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
-      }
-      if (msg.mediaData.mediaStage.includes('ERROR') || msg.mediaData.mediaStage === 'FETCHING') {
-        return null;
-      }
-
-      // The library passes a stand-in for its performance logger; without it
-      // the download manager throws on a missing argument.
-      const mockQpl = { addAnnotations() { return this; }, addPoint() { return this; } };
-      const decrypted = await window.require('WAWebDownloadManager')
-        .downloadManager.downloadAndMaybeDecrypt({
-          directPath: msg.directPath, encFilehash: msg.encFilehash,
-          filehash: msg.filehash, mediaKey: msg.mediaKey,
-          mediaKeyTimestamp: msg.mediaKeyTimestamp, type: msg.type,
-          signal: new AbortController().signal, downloadQpl: mockQpl,
-        });
-
-      const toB64 = window.WWebJS.arrayBufferToBase64Async || window.WWebJS.arrayBufferToBase64;
-      return {
-        data: await toB64(decrypted),
-        mimetype: msg.mimetype,
+      const about = {
+        mimetype: msg.mimetype || (msg.type ? `${msg.type}/*` : undefined),
         filename: msg.filename,
         filesize: msg.size,
       };
+
+      // Ask WhatsApp to resolve the media if it has not already.
+      try {
+        if (!msg.mediaData || msg.mediaData.mediaStage !== 'RESOLVED') {
+          await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
+        }
+      } catch (e) { say('asking WhatsApp to fetch it', e); }
+
+      const asBase64 = (blob) => new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result).split(',')[1]);
+        fr.onerror = () => reject(new Error('the file could not be read'));
+        fr.readAsDataURL(blob);
+      });
+
+      // 1. The copy WhatsApp already has in hand.
+      try {
+        const md = msg.mediaData || {};
+        const blob = (md.mediaBlob && (md.mediaBlob._blob || md.mediaBlob)) || md.blob;
+        if (blob && typeof blob.size === 'number') {
+          const data = await asBase64(blob);
+          if (data) return { ...about, data, via: 'the copy already downloaded' };
+        }
+        say('the copy already downloaded', 'not held in memory');
+      } catch (e) { say('the copy already downloaded', e); }
+
+      // 2. Fetch and decrypt it ourselves, as the library does.
+      try {
+        const mockQpl = { addAnnotations() { return this; }, addPoint() { return this; } };
+        const decrypted = await window.require('WAWebDownloadManager')
+          .downloadManager.downloadAndMaybeDecrypt({
+            directPath: msg.directPath, encFilehash: msg.encFilehash,
+            filehash: msg.filehash, mediaKey: msg.mediaKey,
+            mediaKeyTimestamp: msg.mediaKeyTimestamp, type: msg.type,
+            signal: new AbortController().signal, downloadQpl: mockQpl,
+          });
+        const toB64 = window.WWebJS.arrayBufferToBase64Async || window.WWebJS.arrayBufferToBase64;
+        const data = await toB64(decrypted);
+        if (data) return { ...about, data, via: 'a fresh download' };
+        say('downloading it', 'came back empty');
+      } catch (e) { say('downloading it', e); }
+
+      return { error: problems.join('; ') };
     }, msgId);
 
-    if (!result || !result.data) return null;
+    if (!result || result.error) {
+      throw new Error(result ? result.error : 'no answer from the page');
+    }
+    if (result.via) log('media fetched via', result.via);
     return new MessageMedia(result.mimetype, result.data, result.filename, result.filesize);
   }
 
@@ -312,14 +347,20 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
    */
   async function resendOne(m, toChatId) {
     if (m.hasMedia) {
-      const media = await mediaOf(m.id);
-      if (media) {
+      try {
+        const media = await mediaOf(m.id);
         return client.sendMessage(toChatId, media, { caption: m.text || undefined });
+      } catch (e) {
+        /* A video that will not download is not a reason to drop the words
+           that came with it — the caption on these is usually the part that
+           explains what the customer is looking at. */
+        log('media could not be sent:', e.message);
+        if (!m.text) throw e;
+        note(`one item is a file that could not be sent — its caption went instead (${e.message})`);
       }
-      // Media that cannot be fetched still has its caption worth sending.
     }
     if (m.text) return client.sendMessage(toChatId, m.text);
-    throw new Error('the media could not be fetched and there was no caption to send instead');
+    throw new Error('there was nothing in it that could be sent');
   }
 
   /**
