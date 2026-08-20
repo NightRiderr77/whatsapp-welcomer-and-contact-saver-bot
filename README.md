@@ -1,253 +1,409 @@
-# PXN Owner Bot
+<div align="center">
 
-A small WhatsApp bot for the **owner's own number**. It does three things and
-nothing else:
+![WhatsApp Welcomer & Contact Saver Bot](docs/banner.svg)
 
-1. **Saves new customers to your contacts** as `Cus 1`, `Cus 2`, … so a name
-   shows up instead of a bare number.
-2. **Sends the group invite once**, on someone's first ever message.
-3. **Chases a customer you haven't replied to** after N minutes.
+**Built by [NightRiderr77](https://github.com/NightRiderr77) · Property of [PXN STORES LK](https://pxnstores.lk)**
 
-It is not the AI agent and shares nothing with it: no model, no prompt, no
-Supabase, no database. Two files, two dependencies, and a password-protected
-panel for changing its mind.
+</div>
 
 ---
 
-## Setup
+## What this does
 
-```bash
-npm install
-mkdir -p state && cp settings.example.json state/settings.json   # then edit it
-node owner-bot.js
-```
+![What it does](docs/features.svg)
 
-Scan the QR printed in the terminal with the **owner's phone**
-(WhatsApp → Linked Devices → Link a Device). To link with an 8-digit code
-instead, start it with `PAIR_NUMBER=947XXXXXXXX` and use *"Link with phone
-number instead"*.
+You run a shop on WhatsApp. All day, new numbers message you. This bot sits on
+your own WhatsApp and handles the boring parts.
 
-### Running it for real
+1. **Saves the customer.** Every new number gets saved to your phone as
+   `Cus 1`, `Cus 2`, `Cus 3` and so on. No more walls of digits.
+2. **Welcomes them once.** Your group invite goes out automatically on their
+   first ever message. Never twice, never to someone you already have.
+3. **Nobody is left waiting.** If you have not replied in 10 minutes, it tells
+   them you have seen the message. You choose the wording and the wait.
+4. **Sends your price list in one go.** Type one short phrase into a chat and
+   the bot sends that customer everything from your template group — prices,
+   photos, terms, in order.
 
-Docker:
-
-```bash
-mkdir -p state && cp settings.example.json state/settings.json
-cp .env.example .env && nano .env         # set DASH_PASSWORD
-docker compose up -d --build
-docker compose logs -f                    # scan the QR here
-```
-
-The panel is then on `http://<your-vps>:8091`.
-
-PM2:
-
-```bash
-pm2 start ecosystem.config.js && pm2 save
-```
+It never answers customers for you. It has no AI. It only does the four things
+above.
 
 ---
 
-## Configuration
+## What you need
 
-Everything lives in **`state/settings.json`**, which is re-read on every message —
-**a change applies immediately, no restart.** Edit it from the dashboard, or by
-hand with `nano`; they are the same file and neither one wins.
-
-| Key | What it does |
+| | |
 |---|---|
-| `enabled` | Master switch. `false` and the bot does nothing at all. |
-| `autoSaveContacts` | Save new customers as `Cus <N>`. |
-| `contactNextNumber` | The next number to use. The bot increments it itself. |
-| `invite.enabled` | Send the group invite on a first message. |
-| `invite.message` | What to send. **No message means nothing is sent**, whatever `enabled` says. |
-| `noReply.enabled` | Chase customers you haven't answered. |
-| `noReply.minutes` | How long to wait first. |
-| `noReply.firstContactOnly` | **Default `true`.** Only ever chase someone the bot watched arrive as a brand-new customer. Set `false` and it will chase any unanswered chat. |
-| `noReply.message` | What to send them. |
+| A **VPS** | A small server that stays on. 2 GB RAM or more. Ubuntu is fine. |
+| A **phone number** | The WhatsApp number your shop uses. |
+| **5 minutes** | That's the whole setup. |
 
-The file lives at **`state/settings.json`** and is git-ignored: it holds your
-live group link and your customer counter, and belongs on the machine that runs
-the bot. The bot writes `contactNextNumber` back to it as it saves people, so
-the counter survives restarts.
-
-Nothing is ever sent to a conversation that existed before the bot started.
-WhatsApp replays unread messages when a client links, and treating that replay
-as new traffic is how an earlier build sent "sorry for the wait" into a few
-hundred old chats at once.
-
-> **Check `noReply.message` before you go live.** If it points customers at
-> another WhatsApp number, make sure that number is still answered. The old
-> build's default sent people to the AI agent, which has been decommissioned.
-
-### Environment
-
-| Variable | Default | Use |
-|---|---|---|
-| `PAIR_NUMBER` | — | Owner's number, to link with a code instead of a QR. |
-| `PUPPETEER_EXECUTABLE_PATH` | Puppeteer's own | Path to Chromium, when it isn't bundled. |
-| `WWEBJS_PATH` | `./.wwebjs_auth` | Where the WhatsApp session is kept. |
-| `STATE_DIR` | `./state` | Where "already greeted / already saved" is kept. |
-| `SETTINGS_FILE` | `<STATE_DIR>/settings.json` | Config location. |
-| `DASH_PASSWORD` | — | **Required for the dashboard.** No password, no panel. |
-| `DASH_PORT` | `8091` | Panel port. |
-| `DASH_HOST` | `0.0.0.0` | Bind address. `127.0.0.1` to require an SSH tunnel. |
+> **2 GB RAM is not optional.** The bot runs a hidden web browser to talk to
+> WhatsApp, and browsers are hungry. On less, WhatsApp will disconnect your
+> phone every few minutes.
 
 ---
 
+## Step 1 — Get into your server
 
-## Moving to another VPS
-
-Three things cannot be rebuilt and must travel: the **WhatsApp login** (or you
-scan a QR again), **settings.json** (including the customer counter — lose it
-and the next customer is `Cus 1`), and the **greeted / saved lists** (lose them
-and every existing customer is invited to the group a second time).
-
-`backup.sh` packs all three plus your `.env`. `restore.sh` puts them back.
-
-### On the old machine
+On Windows use PowerShell, on Mac use Terminal. Type this, with your own server
+address:
 
 ```bash
-cd ~/pxn-owner-bot && ./backup.sh
+ssh ubuntu@YOUR-SERVER-IP
 ```
 
-Run it as the user that owns the folder — not `sudo -i`, where `~` is root's
-home and the folder isn't there. If you get `Permission denied`, the clone lost
-the executable bit; `bash backup.sh` works regardless, or `chmod +x *.sh` once.
+Everything below is typed into that window.
 
-It stops the bot first, on purpose: Chromium writes to the profile constantly
-and copying it live can capture a half-written session that restores as a
-logged-out one. It starts the bot again when it's done. Use `./backup.sh --live`
-only if you accept that risk.
+## Step 2 — Install Docker
 
-You get `pxn-owner-bot-backup-<date>.tar.gz`. Send it over:
+Docker is the thing that runs the bot. Copy this whole line and press Enter:
 
 ```bash
-scp pxn-owner-bot-backup-*.tar.gz ubuntu@<new-vps>:~/
+curl -fsSL https://get.docker.com | sudo sh
 ```
 
-> That file is a **live WhatsApp login and your dashboard password**. Treat it
-> like a password — move it, restore it, delete it. Never commit it; `*.tar.gz`
-> is git-ignored for that reason.
-
-### On the new machine
-
-Docker and the compose plugin first, if it's a bare box:
+Then let yourself use it without typing `sudo` every time:
 
 ```bash
-curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER && newgrp docker
+sudo usermod -aG docker $USER && newgrp docker
 ```
 
-Get the code:
+Check it worked. You should see a version number:
 
 ```bash
-git clone https://github.com/NightRiderr77/pxn-owner-bot.git ~/pxn-owner-bot
+docker --version
 ```
 
-Restore and start:
+## Step 3 — Download the bot
 
 ```bash
-cd ~/pxn-owner-bot && mv ~/pxn-owner-bot-backup-*.tar.gz . && ./restore.sh pxn-owner-bot-backup-*.tar.gz
+git clone https://github.com/NightRiderr77/whatsapp-welcomer-and-contact-saver-bot.git ~/welcomer-bot
+```
+
+```bash
+cd ~/welcomer-bot
+```
+
+## Step 4 — Set your password
+
+This is the password for your control panel. Make it long.
+
+```bash
+cp .env.example .env && nano .env
+```
+
+Change `pick-something-long` to your own password. Then press
+**Ctrl+X**, then **Y**, then **Enter** to save.
+
+## Step 5 — Start it
+
+```bash
+docker compose up -d --build
+```
+
+The first time takes a few minutes. Then:
+
+```bash
+docker compose logs -f
+```
+
+A **QR code** appears in the window.
+
+## Step 6 — Scan the QR
+
+On your phone: **WhatsApp → Settings → Linked Devices → Link a Device**, then
+point the camera at the QR code on your screen.
+
+When you see `ready.` in the window, it is working. Press **Ctrl+C** to stop
+watching the log — the bot keeps running.
+
+---
+
+## Your control panel
+
+![Control panel](docs/dashboard.svg)
+
+Open this in any browser, on your phone or your laptop:
+
+```
+http://YOUR-SERVER-IP:8091
+```
+
+Sign in with the password from Step 4. Everything you change here applies
+**immediately** — no restarting.
+
+### What each setting means
+
+| Setting | What it does |
+|---|---|
+| **Bot on** | Turn everything off in one click. |
+| **Save new customers** | Save new numbers as `Cus 1`, `Cus 2` … |
+| **Next number** | The number the next customer gets. |
+| **Group invite** | The welcome message sent on someone's first message. Leave it empty and nothing is sent. |
+| **No-reply chase** | Message customers you haven't answered yet. |
+| **Only brand-new customers** | Keep this **on**. Off means it will also chase people you have known for months. |
+| **Wait (minutes)** | How long before it chases. |
+| **Preset broadcast** | See below. |
+
+> The four numbers at the top — **Next no. / Saved / Greeted / Waiting** — are
+> your health check. If **Next no.** is stuck on `1`, something is wrong and a
+> red box on the page will tell you what.
+
+---
+
+## Sending your price list with one phrase
+
+This is the fastest way to answer "how much?".
+
+**Set it up once:**
+
+1. On WhatsApp, make a **group with only you in it**. Call it `forward-all`.
+2. Post everything a new customer should get: price list, photos, terms.
+   Order matters — it is sent in the same order.
+3. In the control panel, turn on **Broadcast**, and set **Phrase you type** to
+   something short like `send prices`.
+
+**Then, forever after:** type `send prices` into any customer's chat. The bot
+sends them the whole group. Capital letters and full stops don't matter.
+
+Only messages **you** posted in the group get sent. Anything a member posted is
+skipped.
+
+---
+
+## Everyday commands
+
+Always `cd ~/welcomer-bot` first.
+
+**See what it is doing**
+
+```bash
+docker compose logs -f
+```
+
+**Stop it**
+
+```bash
+docker compose stop
+```
+
+**Start it again**
+
+```bash
+docker compose start
+```
+
+**Restart it**
+
+```bash
+docker compose restart
+```
+
+**Is it running?**
+
+```bash
+docker compose ps
+```
+
+**Update to the newest version**
+
+```bash
+git pull && docker compose up -d --build
+```
+
+---
+
+## Limiting how much of the server it uses
+
+The bot already limits itself to **1 CPU core**. You can change that in
+`docker-compose.yml`:
+
+```bash
+nano docker-compose.yml
+```
+
+Find `cpus: "1.0"`. Use `"0.5"` for half a core, `"2.0"` for two. Save with
+**Ctrl+X**, **Y**, **Enter**, then:
+
+```bash
+docker compose up -d
+```
+
+> **Never add a memory limit.** There is a `memory:` setting you might be
+> tempted to add — don't. The browser gets killed before the bot notices, the
+> WhatsApp page reloads over and over, and eventually WhatsApp unlinks your
+> phone. It looks like a login problem and it isn't.
+
+**Check what it is actually using:**
+
+```bash
+docker stats --no-stream
+```
+
+---
+
+## Moving to another server
+
+Three things must come with you, or you will be scanning a QR again and
+inviting all your old customers a second time: the **WhatsApp login**, your
+**settings and counter**, and the **list of who you have already saved**.
+
+The two scripts do all of it.
+
+**On the old server:**
+
+```bash
+cd ~/welcomer-bot && ./backup.sh
+```
+
+This stops the bot, packs everything into one file, and starts it again. You
+get a file like `welcomer-bot-backup-2026-08-20-1243.tar.gz`.
+
+Send it to the new server:
+
+```bash
+scp welcomer-bot-backup-*.tar.gz ubuntu@NEW-SERVER-IP:~/
+```
+
+> ⚠️ **That file is your WhatsApp login and your panel password.** Treat it like
+> a password. Move it, use it, delete it.
+
+**On the new server**, do Step 1, Step 2 and Step 3 above, then:
+
+```bash
+cd ~/welcomer-bot && mv ~/welcomer-bot-backup-*.tar.gz . && ./restore.sh welcomer-bot-backup-*.tar.gz
 ```
 
 ```bash
 docker compose up -d --build && docker compose logs -f
 ```
 
-You want `cleared a stale Chromium lock` (the profile remembers the old
-machine — that is expected and handled) then `ready.` — **and no QR**. A QR
-means the session didn't come across.
+You should see `ready.` and **no QR code**. If a QR appears, the login did not
+come across.
 
-### Then
-
-```bash
-shred -u pxn-owner-bot-backup-*.tar.gz
-```
-
-And stop the old one, so two bots aren't on the same number:
+**Then clean up.** Delete the backup file:
 
 ```bash
-cd ~/pxn-owner-bot && docker compose down     # on the OLD machine
+shred -u welcomer-bot-backup-*.tar.gz
 ```
 
-Check the dashboard at `http://<new-vps>:8091` shows your real **Next no.**, not 1.
+And turn off the old one, so two bots aren't on one number:
 
-### Requirements for the new box
-
-| | |
-|---|---|
-| RAM | **2 GB or more.** Chromium running WhatsApp Web wants roughly a gigabyte to itself. Do not put a `memory` limit on the container — the renderer gets killed, the page reloads, and WhatsApp eventually unlinks the device. |
-| Disk | ~2 GB for the image, Chromium and the profile. |
-| Ports | `8091` for the dashboard, if you want to reach it. |
-
-### If the repo is private
-
-`git clone` will ask for a username and password. GitHub stopped accepting
-account passwords — the "password" is a **personal access token**, created at
-*Settings → Developer settings → Personal access tokens → Fine-grained*, with
-**Contents: Read-only** on this repository.
-
-Type it at the prompt. Do not put it in this file, in a script, or in a clone
-URL: anything committed here is in the git history permanently, and a repo is
-the one place a credential must never live. If you want cloning to need no
-token at all, make the repository public — there are no secrets in it (the
-group link, the counter and the password live in `settings.json` and `.env`,
-both git-ignored).
+```bash
+cd ~/welcomer-bot && docker compose down    # on the OLD server
+```
 
 ---
 
-## The dashboard
+## Removing the bot completely
 
-`http://<your-vps>:8091`. It shows, in this order:
+**Stop it and delete the container:**
 
-1. **Whether the settings file is actually being read.** A red banner with the
-   path and the reason when it isn't. This is first because the alternative is
-   what happened in production: the bot ran on defaults for a day, saved every
-   customer as "Cus 1", and nothing anywhere said so.
-2. **Next number, saved, greeted, waiting** — a counter stuck at 1 is now
-   something you can see rather than something you deduce from your contacts.
-3. Every setting, editable.
-4. The last 40 things it did.
+```bash
+cd ~/welcomer-bot && docker compose down
+```
 
-A **password is required**: with no `DASH_PASSWORD` the panel does not start and
-the bot logs why. The old build made auth optional, which on a public port means
-off. Sessions are random tokens (not a hash of the password, which never
-rotated), expire after 12 hours, and five wrong guesses locks logins for 15
-minutes.
+**Take a backup first if you might want it back:**
 
-To keep it off the internet entirely, publish it on loopback in
-`docker-compose.yml` — `"127.0.0.1:8091:8091"` — and reach it through
-`ssh -L 8091:127.0.0.1:8091 <your-vps>`.
+```bash
+./backup.sh
+```
 
-## What was dropped, and why
+**Delete everything, including your WhatsApp login and settings:**
 
-- **Everything AI** — the model, the prompt, the escalations, the learned Q&A,
-  the Supabase sync. That's the agent, and it isn't this.
+```bash
+cd ~ && rm -rf ~/welcomer-bot
+```
 
-Bugs fixed on the way across:
+> This cannot be undone. Your saved contacts stay on your phone, but the
+> counter, the settings and the login are gone.
 
-- The "who has already been greeted" list was re-read from disk on **every
-  incoming message**, and rewritten whole on every new contact. It's now loaded
-  once and kept in memory.
-- The pending-reply map never dropped anyone it had already chased, so it grew
-  for the life of the process. Chased chats are now forgotten after a day.
-- `settings.json` was bind-mounted as a single *file*. Docker creates a
-  directory when the source is missing, every read failed, and the failure was
-  swallowed. Config moved into the `state/` directory mount, and an unreadable
-  settings file is now fatal at startup instead of silent.
-- Unread history replayed at link time was treated as new traffic, so old
-  answered chats got chased. Anything older than the process start is ignored.
-- A `memory` cap on the container unlinked the phone. Chromium's renderer is
-  killed by the cgroup long before Node feels anything, the WhatsApp tab
-  reloads, whatsapp-web.js re-injects on every navigation and re-emits
-  `authenticated`, and after enough of that WhatsApp drops the device with
-  `disconnected: LOGOUT`. It reads as a login fault and is a RAM one. The cap
-  is gone; repeated reloads now say so in the log.
-- Chromium stamps `<hostname>-<pid>` into a `SingletonLock` in the profile and
-  refuses to open a profile it thinks another Chromium holds. A container's
-  hostname is a new random id on every rebuild, so every rebuild inherited a
-  lock naming a machine that no longer existed — `Failed to launch the browser
-  process: Code: 21`, forever, behind a restart policy. The hostname is now
-  pinned in `docker-compose.yml`, and a lock is cleared at startup when it is
-  provably dead (different machine, or same machine with a dead pid). A lock
-  whose owner is still running is left alone.
+**Also unlink it from WhatsApp**, on your phone:
+**Settings → Linked Devices**, tap the entry, **Log out**.
+
+**Free the disk space Docker used:**
+
+```bash
+docker system prune -af
+```
+
+---
+
+## When something goes wrong
+
+**A QR code keeps appearing**
+
+WhatsApp unlinked the device. Usually the server is short on memory — check
+with `free -m`. You need 2 GB.
+
+**Every customer is saved as `Cus 1`**
+
+The bot cannot read its settings. Open the control panel — a red box at the top
+says exactly why.
+
+**`Failed to launch the browser process: Code: 21`**
+
+An old lock from a previous run. The bot clears these itself on start; if it
+persists:
+
+```bash
+cd ~/welcomer-bot && docker compose down && docker compose up -d --build
+```
+
+**The panel won't open**
+
+Check the bot is running with `docker compose ps`, and that your server's
+firewall allows port `8091`.
+
+**`Permission denied` when running a script**
+
+```bash
+bash backup.sh
+```
+
+Works whether or not the file is marked executable.
+
+---
+
+## Where things are kept
+
+| File | What's in it |
+|---|---|
+| `state/settings.json` | All your settings and the customer counter. |
+| `state/saved-contacts.json` | Who has been saved already. |
+| `state/greeted.json` | Who has had the welcome message. |
+| `.wwebjs_auth/` | Your WhatsApp login. |
+| `.env` | Your control panel password. |
+
+None of these are in the repository, and none should ever be shared.
+
+---
+
+## Running without Docker
+
+If you prefer PM2:
+
+```bash
+npm install && npm install -g pm2
+```
+
+```bash
+DASH_PASSWORD=your-password pm2 start ecosystem.config.js && pm2 save
+```
+
+```bash
+pm2 logs welcomer-bot
+```
+
+---
+
+<div align="center">
+
+### WhatsApp Welcomer &amp; Contact Saver Bot
+
+Built by **[NightRiderr77](https://github.com/NightRiderr77)**
+
+Property of **[PXN STORES LK](https://pxnstores.lk)** · [pxnstores.lk](https://pxnstores.lk)
+
+</div>

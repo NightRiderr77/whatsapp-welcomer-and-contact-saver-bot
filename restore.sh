@@ -2,13 +2,27 @@
 #
 # Unpack a backup into this folder, on a fresh machine.
 #
-#   ./restore.sh pxn-owner-bot-backup-2026-08-20-1243.tar.gz
+#   ./restore.sh welcomer-bot-backup-2026-08-20-1243.tar.gz
 #   ./restore.sh <file> --force     overwrite what is already here
 #
 # Afterwards: docker compose up -d --build
 #
 set -euo pipefail
 cd "$(dirname "$0")"
+# Branding, drawn without colour codes so it reads the same in a terminal, in
+# `docker compose logs`, and in a log file somebody opens six months from now.
+banner() {
+  cat <<'BANNER'
+
+  +--------------------------------------------------------+
+  |   WhatsApp Welcomer & Contact Saver Bot                 |
+  |   Built by NightRiderr77                                |
+  |   Property of PXN STORES LK  .  https://pxnstores.lk    |
+  +--------------------------------------------------------+
+
+BANNER
+}
+banner
 
 # Root-owned files (the container writes as root) need sudo to read — but a
 # minimal image or a root shell may not have sudo at all, and assuming it does
@@ -33,7 +47,7 @@ fi
 
 # Restoring over a running bot gives two clients one profile, which corrupts
 # the session — the one thing a backup exists to protect.
-if docker ps -q -f name='^pxn-owner-bot$' 2>/dev/null | grep -q .; then
+if [ -n "$(docker compose ps -q 2>/dev/null)" ]; then
   echo "==> stopping the running bot first"
   docker compose stop
 fi

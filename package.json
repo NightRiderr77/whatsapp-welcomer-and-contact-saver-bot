@@ -1,8 +1,10 @@
 {
-  "name": "pxn-owner-bot",
+  "name": "whatsapp-welcomer-and-contact-saver-bot",
   "version": "1.0.0",
-  "description": "Light WhatsApp bot for the PXN owner number: saves new customers to contacts, sends the group invite once, and chases a customer you haven't replied to.",
+  "description": "Saves every new WhatsApp customer to your contacts, welcomes them once, chases anyone you have not answered, and sends your whole price list on one typed phrase. Built by NightRiderr77 for PXN STORES LK.",
   "main": "owner-bot.js",
+  "author": "NightRiderr77 (https://github.com/NightRiderr77)",
+  "homepage": "https://pxnstores.lk",
   "private": true,
   "scripts": {
     "start": "node owner-bot.js"

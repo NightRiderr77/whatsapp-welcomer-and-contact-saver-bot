@@ -12,6 +12,20 @@
 #
 set -euo pipefail
 cd "$(dirname "$0")"
+# Branding, drawn without colour codes so it reads the same in a terminal, in
+# `docker compose logs`, and in a log file somebody opens six months from now.
+banner() {
+  cat <<'BANNER'
+
+  +--------------------------------------------------------+
+  |   WhatsApp Welcomer & Contact Saver Bot                 |
+  |   Built by NightRiderr77                                |
+  |   Property of PXN STORES LK  .  https://pxnstores.lk    |
+  +--------------------------------------------------------+
+
+BANNER
+}
+banner
 
 # Root-owned files (the container writes as root) need sudo to read — but a
 # minimal image or a root shell may not have sudo at all, and assuming it does
@@ -22,11 +36,13 @@ if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
 fi
 
 STAMP="$(date +%Y-%m-%d-%H%M)"
-OUT="pxn-owner-bot-backup-${STAMP}.tar.gz"
+OUT="welcomer-bot-backup-${STAMP}.tar.gz"
 LIVE=0
 if [ "${1:-}" = "--live" ]; then LIVE=1; fi
 
-running() { docker ps -q -f name='^pxn-owner-bot$' 2>/dev/null | grep -q .; }
+# Asked of compose rather than by container name: a rename of the service
+# must not quietly turn 'is it running?' into a permanent no.
+running() { [ -n "$(docker compose ps -q 2>/dev/null)" ]; }
 
 # Chromium writes to the profile continuously. Copying it while the browser is
 # running can capture a half-written session that restores as a logged-out one,

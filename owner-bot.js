@@ -1,14 +1,16 @@
 'use strict';
 
 /**
- * PXN OWNER BOT
+ * WhatsApp Welcomer & Contact Saver Bot
+ * Built by NightRiderr77 · Property of PXN STORES LK · https://pxnstores.lk
  *
- * A small WhatsApp bot that runs on the owner's own number and does three
- * things, none of which involve answering anybody:
+ * Runs on the owner's own WhatsApp number and does four things, none of which
+ * involve answering anybody on your behalf:
  *
  *   1. Saves a new customer to the phone's address book as "Cus <N>".
  *   2. Sends the group invite once, on their first ever message.
  *   3. Chases a customer you haven't replied to within N minutes.
+ *   4. Sends a whole template group to a customer when you type one phrase.
  *
  * It is deliberately not the AI agent: no model, no prompt, no Supabase.
  *
@@ -29,6 +31,8 @@ const os     = require('os');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 const { startDashboard } = require('./dashboard');
+const { createForwarder } = require('./forwarder');
+const { BRAND, banner } = require('./brand');
 
 const SESSION_PATH  = process.env.WWEBJS_PATH   || path.join(__dirname, '.wwebjs_auth');
 const STATE_DIR     = process.env.STATE_DIR     || path.join(__dirname, 'state');
@@ -72,7 +76,6 @@ const STARTED_AT = Math.floor(Date.now() / 1000);
  * nobody wrote. Directories are safe to auto-create; files are not.
  */
 const SETTINGS_FILE = process.env.SETTINGS_FILE || path.join(STATE_DIR, 'settings.json');
-const LEGACY_SETTINGS_FILE = path.join(__dirname, 'settings.json');
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 //
@@ -86,6 +89,13 @@ const DEFAULTS = {
   invite: {
     enabled: false,       // stays off until a real invite message is configured
     message: '',
+  },
+  forward: {
+    enabled: false,
+    group   : 'forward-all',
+    trigger : '',
+    limit   : 40,
+    gapMs   : 900,
   },
   noReply: {
     enabled: true,
@@ -140,6 +150,7 @@ function loadSettings() {
       ...DEFAULTS, ...raw,
       invite : { ...DEFAULTS.invite,  ...(raw.invite  || {}) },
       noReply: { ...DEFAULTS.noReply, ...(raw.noReply || {}) },
+      forward: { ...DEFAULTS.forward, ...(raw.forward || {}) },
     };
   } catch (e) {
     complain(`${SETTINGS_FILE} is not valid JSON: ${e.message}`);
@@ -163,14 +174,6 @@ function ensureSettingsFile() {
   }
 
   if (!st) {
-    // Carry a file over from the old layout rather than silently ignoring it.
-    try {
-      if (fs.statSync(LEGACY_SETTINGS_FILE).isFile()) {
-        fs.copyFileSync(LEGACY_SETTINGS_FILE, SETTINGS_FILE);
-        log(`moved settings from ${LEGACY_SETTINGS_FILE} to ${SETTINGS_FILE}`);
-        return;
-      }
-    } catch { /* no legacy file either */ }
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(DEFAULTS, null, 2));
     log(`no settings file — wrote defaults to ${SETTINGS_FILE}. Edit it; changes apply immediately.`);
   }
@@ -243,6 +246,17 @@ const client = new Client({
   },
 });
 
+/* Preset broadcast. Built here so it shares the one client, and given
+   rememberOwnSend so its own sends are never mistaken for the owner replying —
+   otherwise sending the template would silently cancel the no-reply timer. */
+const forwarder = createForwarder({
+  client,
+  loadSettings,
+  note,
+  log,
+  onSent: (m) => rememberOwnSend(m),
+});
+
 client.on('code', (code) => {
   const pretty = String(code).replace(/(.{4})(.{4})/, '$1-$2');
   log(
@@ -283,6 +297,7 @@ client.on('ready', () => {
     `contacts=${s.autoSaveContacts ? 'on' : 'off'}`,
     `invite=${s.invite.enabled && s.invite.message ? 'on' : 'off'}`,
     `no-reply=${s.noReply.enabled ? s.noReply.minutes + 'm' : 'off'}`,
+    `broadcast=${s.forward.enabled && s.forward.trigger ? '"' + s.forward.trigger + '"' : 'off'}`,
   ].join(' ');
   // Only when something actually changed — see the reload note above.
   if (summary === announced) return;
@@ -423,12 +438,24 @@ client.on('message', async (msg) => {
 });
 
 // ─── The owner replying stops the clock ──────────────────────────────────────
-client.on('message_create', (msg) => {
+client.on('message_create', async (msg) => {
   if (!msg.fromMe) return;
   if (typeof msg.to === 'string' && msg.to.endsWith('@g.us')) return;
   const id = msg.id && msg.id._serialized;
   if (id && botSentIds.has(id)) { botSentIds.delete(id); return; } // our own send, not a reply
   pending.delete(msg.to);
+
+  /* Typing the trigger phrase to a customer sends them the template group.
+     Checked before anything expensive: isTrigger() is a string compare against
+     settings already in memory, so the ordinary case of the owner just talking
+     to somebody costs nothing. */
+  if (!forwarder.isTrigger(msg.body)) return;
+  try {
+    const r = await forwarder.broadcastTo(msg.to);
+    if (r.ok) note(`sent the "${loadSettings().forward.group}" template to ${msg.to.replace(/@c\.us$/, '')} (${r.sent}/${r.of} messages)`);
+  } catch (e) {
+    note(`broadcast failed: ${e.message}`);
+  }
 });
 
 // ─── 3. Chase anyone still waiting ───────────────────────────────────────────
@@ -590,14 +617,16 @@ const dashboard = startDashboard({
       greeted          : greeted.size,
       // Only those still owed a reply; the chased ones linger for a day.
       pending          : [...pending.values()].filter((p) => !p.notified).length,
+      forward          : forwarder.status(),
       activity,
     };
   },
 });
 
 // ─── Go ──────────────────────────────────────────────────────────────────────
+console.log(banner());
 clearStaleProfileLock();
-log('starting owner WhatsApp client…');
+log('starting WhatsApp client…');
 client.initialize().catch((e) => {
   console.error('[owner] init error:', e.message);
   process.exit(1);

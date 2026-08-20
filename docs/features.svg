@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="The four things the bot does: saves the contact, sends a welcome, chases unanswered chats, and sends your price list on one phrase">
+  <defs>
+    <style>
+      .t { font-family: Segoe UI, Helvetica, Arial, sans-serif; }
+      .h { font-size: 19px; font-weight: 700; fill: #f2f2f5; }
+      .b { font-size: 14px; fill: #8b8b98; }
+      .n { font-size: 13px; font-weight: 700; fill: #0a0a0d; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="300" fill="#0a0a0d"/>
+
+  <!-- 1 -->
+  <g transform="translate(40 46)">
+    <rect width="266" height="208" rx="16" fill="#131319" stroke="#ffffff" stroke-opacity="0.08"/>
+    <circle cx="34" cy="38" r="16" fill="#e0a34e"/>
+    <text class="t n" x="34" y="43" text-anchor="middle">1</text>
+    <text class="t h" x="24" y="92">Saves the contact</text>
+    <text class="t b" x="24" y="122">A new number becomes</text>
+    <text class="t b" x="24" y="144">“Cus 1”, “Cus 2”, “Cus 3” …</text>
+    <text class="t b" x="24" y="166">so you see a name, not</text>
+    <text class="t b" x="24" y="188">eleven digits.</text>
+  </g>
+
+  <!-- 2 -->
+  <g transform="translate(326 46)">
+    <rect width="266" height="208" rx="16" fill="#131319" stroke="#ffffff" stroke-opacity="0.08"/>
+    <circle cx="34" cy="38" r="16" fill="#e0a34e"/>
+    <text class="t n" x="34" y="43" text-anchor="middle">2</text>
+    <text class="t h" x="24" y="92">Welcomes them</text>
+    <text class="t b" x="24" y="122">Your group invite goes</text>
+    <text class="t b" x="24" y="144">out once, on their first</text>
+    <text class="t b" x="24" y="166">ever message. Never</text>
+    <text class="t b" x="24" y="188">twice.</text>
+  </g>
+
+  <!-- 3 -->
+  <g transform="translate(612 46)">
+    <rect width="266" height="208" rx="16" fill="#131319" stroke="#ffffff" stroke-opacity="0.08"/>
+    <circle cx="34" cy="38" r="16" fill="#e0a34e"/>
+    <text class="t n" x="34" y="43" text-anchor="middle">3</text>
+    <text class="t h" x="24" y="92">Nobody waits</text>
+    <text class="t b" x="24" y="122">If you have not replied</text>
+    <text class="t b" x="24" y="144">in 10 minutes, it tells</text>
+    <text class="t b" x="24" y="166">them you have seen the</text>
+    <text class="t b" x="24" y="188">message.</text>
+  </g>
+
+  <!-- 4 -->
+  <g transform="translate(898 46)">
+    <rect width="266" height="208" rx="16" fill="#131319" stroke="#25d366" stroke-opacity="0.30"/>
+    <circle cx="34" cy="38" r="16" fill="#25d366"/>
+    <text class="t n" x="34" y="43" text-anchor="middle">4</text>
+    <text class="t h" x="24" y="92">One phrase, everything</text>
+    <text class="t b" x="24" y="122">Type “send prices” and</text>
+    <text class="t b" x="24" y="144">your whole price list,</text>
+    <text class="t b" x="24" y="166">photos and all, goes to</text>
+    <text class="t b" x="24" y="188">that customer.</text>
+  </g>
+</svg>

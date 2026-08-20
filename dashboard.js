@@ -78,6 +78,13 @@ function sanitise(body, current) {
       enabled: asBool(body.invite && body.invite.enabled, current.invite.enabled),
       message: asText(body.invite && body.invite.message, current.invite.message),
     },
+    forward: {
+      enabled: asBool(body.forward && body.forward.enabled, current.forward.enabled),
+      group  : asText(body.forward && body.forward.group, current.forward.group),
+      trigger: asText(body.forward && body.forward.trigger, current.forward.trigger),
+      limit  : asCount(body.forward && body.forward.limit, current.forward.limit, 1, 200),
+      gapMs  : asCount(body.forward && body.forward.gapMs, current.forward.gapMs, 200, 10000),
+    },
     noReply: {
       enabled         : asBool(body.noReply && body.noReply.enabled, current.noReply.enabled),
       minutes         : asCount(body.noReply && body.noReply.minutes, current.noReply.minutes, 1, 1440),
@@ -89,7 +96,7 @@ function sanitise(body, current) {
 
 const PAGE = String.raw`<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PXN Owner Bot</title>
+<title>WhatsApp Welcomer &amp; Contact Saver</title>
 <style>
   :root{
     --bg:#0a0a0d; --panel:#131319; --raised:#1b1b23; --line:rgba(255,255,255,.08);
@@ -101,9 +108,17 @@ const PAGE = String.raw`<!doctype html>
     font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
     max-width:660px;margin-inline:auto;padding:20px 16px 64px}
   h1{font-size:17px;margin:0;letter-spacing:-.01em}
+  .amp{color:var(--accent)}
+  .sub{margin:3px 0 0;font-size:11.5px;color:var(--muted)}
+  .sub a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line)}
+  .sub a:hover{color:var(--accent);border-color:var(--accent)}
+  footer{margin-top:26px;padding-top:16px;border-top:1px solid var(--line);
+    text-align:center;font-size:11.5px;color:var(--muted);line-height:1.7}
+  footer a{color:var(--accent);text-decoration:none}
+  footer strong{color:var(--fg);font-weight:600}
   h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
     margin:0 0 12px;font-weight:600}
-  header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+  header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:18px}
   .pill{font:600 11px/1 var(--mono);padding:5px 9px;border-radius:99px;
     border:1px solid var(--line);color:var(--muted);white-space:nowrap}
   .pill.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
@@ -159,7 +174,11 @@ const PAGE = String.raw`<!doctype html>
 </style>
 
 <header>
-  <h1>PXN Owner Bot</h1>
+  <div>
+    <h1>WhatsApp Welcomer <span class="amp">&amp;</span> Contact Saver</h1>
+    <p class="sub">Built by <a href="https://github.com/NightRiderr77" target="_blank" rel="noopener">NightRiderr77</a>
+      · Property of <a href="https://pxnstores.lk" target="_blank" rel="noopener">PXN STORES LK</a></p>
+  </div>
   <span class="pill" id="conn">checking…</span>
 </header>
 
@@ -204,9 +223,31 @@ const PAGE = String.raw`<!doctype html>
 </div>
 
 <div class="card">
+  <h2>Preset broadcast</h2>
+  <p class="hint" style="margin:0 0 4px">
+    Type the phrase below into any customer chat and the bot sends them everything
+    in your template group — price list, photos, terms — in order.
+  </p>
+  <label class="sw"><input type="checkbox" id="fwEnabled"> Broadcast on</label>
+  <label for="fwTrigger">Phrase you type</label>
+  <input type="text" id="fwTrigger" placeholder="send prices">
+  <label for="fwGroup">Template group name</label>
+  <input type="text" id="fwGroup" placeholder="forward-all">
+  <div class="hint">A normal WhatsApp group you keep to yourself. Only messages
+    <em>you</em> posted there are sent on. <span id="fwState"></span></div>
+</div>
+
+<div class="card">
   <h2>Recent</h2>
   <ul id="log"><li class="empty">Nothing yet.</li></ul>
 </div>
+
+<footer>
+  <strong>WhatsApp Welcomer &amp; Contact Saver Bot</strong><br>
+  Built by <a href="https://github.com/NightRiderr77" target="_blank" rel="noopener">NightRiderr77</a>
+  · Property of <a href="https://pxnstores.lk" target="_blank" rel="noopener">PXN STORES LK</a><br>
+  <a href="https://pxnstores.lk" target="_blank" rel="noopener">pxnstores.lk</a>
+</footer>
 
 <div class="bar">
   <button id="save">Save changes</button>
@@ -229,6 +270,9 @@ function paintSettings(s) {
   $('nrFirst').checked    = s.noReply.firstContactOnly;
   $('nrMin').value        = s.noReply.minutes;
   $('nrMsg').value        = s.noReply.message;
+  $('fwEnabled').checked  = s.forward.enabled;
+  $('fwTrigger').value    = s.forward.trigger;
+  $('fwGroup').value      = s.forward.group;
 }
 
 function paintStatus(st) {
@@ -246,6 +290,14 @@ function paintStatus(st) {
     $('healthMsg').textContent = st.settingsError || 'Settings cannot be read — the bot is running on defaults.';
     $('healthPath').textContent = st.settingsFile;
   }
+
+  const f = st.forward || {};
+  const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  $('fwState').textContent = f.running
+    ? 'Sending to ' + plural(f.running, 'chat') + ' right now.'
+    : f.templateCached != null
+      ? plural(f.templateCached, 'message') + ' ready to send.'
+      : f.groupResolved ? 'Group found.' : '';
 
   const ul = $('log');
   if (!st.activity.length) {
@@ -285,6 +337,8 @@ $('save').onclick = async () => {
       invite:  { enabled: $('invEnabled').checked, message: $('invMsg').value },
       noReply: { enabled: $('nrEnabled').checked, minutes: +$('nrMin').value,
                  firstContactOnly: $('nrFirst').checked, message: $('nrMsg').value },
+      forward: { enabled: $('fwEnabled').checked, trigger: $('fwTrigger').value,
+                 group: $('fwGroup').value },
     }),
   });
   dirty = false;
@@ -300,7 +354,7 @@ setInterval(refresh, 10000);
 
 const LOGIN_PAGE = String.raw`<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PXN Owner Bot</title>
+<title>WhatsApp Welcomer &amp; Contact Saver</title>
 <style>
   body{margin:0;min-height:100dvh;display:grid;place-items:center;background:#0a0a0d;color:#e9e9ee;
     font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:20px}

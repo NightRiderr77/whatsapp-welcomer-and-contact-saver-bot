@@ -1,15 +1,18 @@
-# PXN Owner Bot —  docker compose up -d --build
+# WhatsApp Welcomer & Contact Saver Bot
+# Built by NightRiderr77 · Property of PXN STORES LK · https://pxnstores.lk
+#
+#   docker compose up -d --build
 #
 # First run: `docker compose logs -f` and scan the QR with the OWNER phone.
 # To link with a code instead, set PAIR_NUMBER below to the owner's number.
 services:
-  pxn-owner-bot:
+  welcomer-bot:
     build: .
-    container_name: pxn-owner-bot
+    container_name: welcomer-bot
     # Pinned, because Chromium stamps the hostname into the profile lock. Left
     # to Docker it is a new random id on every rebuild, so yesterday's lock
     # always reads as "in use by another computer" and the browser won't start.
-    hostname: pxn-owner-bot
+    hostname: welcomer-bot
     restart: unless-stopped
     environment:
       # The bot is light, but Chromium is not — cap Node's heap so the two

@@ -1,13 +1,14 @@
-// PM2 config, for running without Docker.
+// WhatsApp Welcomer & Contact Saver Bot — PM2 config, for running without Docker.
+// Built by NightRiderr77 · Property of PXN STORES LK
 //
 //   npm install
 //   pm2 start ecosystem.config.js
-//   pm2 logs pxn-owner-bot     # scan the QR here on the first run
+//   pm2 logs welcomer-bot     # scan the QR here on the first run
 //   pm2 save && pm2 startup    # survive a reboot
 module.exports = {
   apps: [
     {
-      name         : 'pxn-owner-bot',
+      name         : 'welcomer-bot',
       script       : 'owner-bot.js',
       autorestart  : true,
       max_restarts : 50,

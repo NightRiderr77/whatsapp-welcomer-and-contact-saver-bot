@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" width="900" height="620" role="img" aria-label="Illustration of the control panel: connection status, counters, and the settings you can change">
+  <defs>
+    <style>
+      .t  { font-family: Segoe UI, Helvetica, Arial, sans-serif; }
+      .m  { font-family: ui-monospace, Menlo, Consolas, monospace; }
+      .h1 { font-size: 17px; font-weight: 700; fill: #e9e9ee; }
+      .sub{ font-size: 11px; fill: #8b8b98; }
+      .h2 { font-size: 11px; font-weight: 600; fill: #8b8b98; letter-spacing: 1.1px; }
+      .lb { font-size: 12px; fill: #8b8b98; }
+      .vl { font-size: 13px; fill: #e9e9ee; }
+      .big{ font-size: 21px; font-weight: 700; fill: #e9e9ee; }
+      .cap{ font-size: 9.5px; fill: #8b8b98; letter-spacing: .6px; }
+    </style>
+  </defs>
+
+  <rect width="900" height="620" rx="14" fill="#0a0a0d"/>
+
+  <!-- header -->
+  <text class="t h1" x="34" y="52">WhatsApp Welcomer <tspan fill="#e0a34e">&amp;</tspan> Contact Saver</text>
+  <text class="t sub" x="34" y="72">Built by NightRiderr77 · Property of PXN STORES LK</text>
+  <g transform="translate(760 36)">
+    <rect width="106" height="26" rx="13" fill="#34d399" fill-opacity="0.10" stroke="#34d399" stroke-opacity="0.35"/>
+    <circle cx="20" cy="13" r="4" fill="#34d399"/>
+    <text class="m" x="34" y="17" font-size="11" font-weight="600" fill="#34d399">connected</text>
+  </g>
+
+  <!-- stats -->
+  <g transform="translate(34 100)">
+    <rect width="832" height="74" rx="12" fill="#131319" stroke="#ffffff" stroke-opacity="0.08"/>
+    <line x1="208" y1="0" x2="208" y2="74" stroke="#ffffff" stroke-opacity="0.08"/>
+    <line x1="416" y1="0" x2="416" y2="74" stroke="#ffffff" stroke-opacity="0.08"/>
+    <line x1="624" y1="0" x2="624" y2="74" stroke="#ffffff" stroke-opacity="0.08"/>
+    <text class="m big" x="104" y="36" text-anchor="middle">2345</text>
+    <text class="t cap" x="104" y="56" text-anchor="middle">NEXT NO.</text>
+    <text class="m big" x="312" y="36" text-anchor="middle">1218</text>
+    <text class="t cap" x="312" y="56" text-anchor="middle">SAVED</text>
+    <text class="m big" x="520" y="36" text-anchor="middle">1204</text>
+    <text class="t cap" x="520" y="56" text-anchor="middle">GREETED</text>
+    <text class="m big" x="728" y="36" text-anchor="middle">3</text>
+    <text class="t cap" x="728" y="56" text-anchor="middle">WAITING</text>
+  </g>
+
+  <!-- bot card -->
+  <g transform="translate(34 194)">
+    <rect width="404" height="180" rx="12" fill="#131319" stroke="#ffffff" stroke-opacity="0.08"/>
+    <text class="t h2" x="20" y="30">BOT</text>
+    <g transform="translate(20 48)">
+      <rect width="38" height="22" rx="11" fill="#e0a34e" fill-opacity="0.30" stroke="#e0a34e" stroke-opacity="0.45"/>
+      <circle cx="27" cy="11" r="8" fill="#e0a34e"/>
+      <text class="t vl" x="50" y="16">Bot on</text>
+    </g>
+    <g transform="translate(20 84)">
+      <rect width="38" height="22" rx="11" fill="#e0a34e" fill-opacity="0.30" stroke="#e0a34e" stroke-opacity="0.45"/>
+      <circle cx="27" cy="11" r="8" fill="#e0a34e"/>
+      <text class="t vl" x="50" y="16">Save new customers as “Cus &lt;N&gt;”</text>
+    </g>
+    <text class="t lb" x="20" y="132">Next number</text>
+    <rect x="20" y="140" width="364" height="30" rx="8" fill="#0d0d12" stroke="#ffffff" stroke-opacity="0.08"/>
+    <text class="m" x="32" y="160" font-size="13" fill="#e9e9ee">2345</text>
+  </g>
+
+  <!-- broadcast card -->
+  <g transform="translate(462 194)">
+    <rect width="404" height="180" rx="12" fill="#131319" stroke="#25d366" stroke-opacity="0.28"/>
+    <text class="t h2" x="20" y="30">PRESET BROADCAST</text>
+    <g transform="translate(20 44)">
+      <rect width="38" height="22" rx="11" fill="#e0a34e" fill-opacity="0.30" stroke="#e0a34e" stroke-opacity="0.45"/>
+      <circle cx="27" cy="11" r="8" fill="#e0a34e"/>
+      <text class="t vl" x="50" y="16">Broadcast on</text>
+    </g>
+    <text class="t lb" x="20" y="94">Phrase you type</text>
+    <rect x="20" y="102" width="364" height="30" rx="8" fill="#0d0d12" stroke="#ffffff" stroke-opacity="0.08"/>
+    <text class="t" x="32" y="122" font-size="13" fill="#e9e9ee">send prices</text>
+    <text class="t lb" x="20" y="152">Template group name</text>
+    <rect x="20" y="158" width="364" height="14" rx="7" fill="#0d0d12" stroke="#ffffff" stroke-opacity="0.06"/>
+  </g>
+
+  <!-- no reply card -->
+  <g transform="translate(34 394)">
+    <rect width="832" height="146" rx="12" fill="#131319" stroke="#ffffff" stroke-opacity="0.08"/>
+    <text class="t h2" x="20" y="30">NO-REPLY CHASE</text>
+    <g transform="translate(20 44)">
+      <rect width="38" height="22" rx="11" fill="#e0a34e" fill-opacity="0.30" stroke="#e0a34e" stroke-opacity="0.45"/>
+      <circle cx="27" cy="11" r="8" fill="#e0a34e"/>
+      <text class="t vl" x="50" y="16">Message customers I haven’t answered</text>
+    </g>
+    <g transform="translate(20 78)">
+      <rect width="38" height="22" rx="11" fill="#e0a34e" fill-opacity="0.30" stroke="#e0a34e" stroke-opacity="0.45"/>
+      <circle cx="27" cy="11" r="8" fill="#e0a34e"/>
+      <text class="t vl" x="50" y="16">Only brand-new customers</text>
+    </g>
+    <text class="t lb" x="20" y="128">Wait (minutes)</text>
+    <rect x="140" y="112" width="80" height="24" rx="7" fill="#0d0d12" stroke="#ffffff" stroke-opacity="0.08"/>
+    <text class="m" x="152" y="129" font-size="12" fill="#e9e9ee">10</text>
+  </g>
+
+  <!-- save bar -->
+  <g transform="translate(0 560)">
+    <rect width="900" height="60" fill="#0a0a0d"/>
+    <line x1="0" y1="0" x2="900" y2="0" stroke="#ffffff" stroke-opacity="0.08"/>
+    <rect x="360" y="16" width="130" height="30" rx="8" fill="#e0a34e"/>
+    <text class="t" x="425" y="36" font-size="13" font-weight="600" fill="#1a1206" text-anchor="middle">Save changes</text>
+    <text class="t" x="506" y="36" font-size="12" fill="#34d399">Saved — live now</text>
+  </g>
+</svg>

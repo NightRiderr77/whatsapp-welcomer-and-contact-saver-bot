@@ -6,6 +6,13 @@
     "enabled": true,
     "message": "👋 *Welcome to PXN STORES!*\n\nJoin our official WhatsApp group for updates & offers:\n👉 https://chat.whatsapp.com/YOUR-GROUP-INVITE-CODE"
   },
+  "forward": {
+    "enabled": false,
+    "group": "forward-all",
+    "trigger": "send prices",
+    "limit": 40,
+    "gapMs": 900
+  },
   "noReply": {
     "enabled": true,
     "minutes": 10,
