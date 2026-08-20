@@ -11,7 +11,9 @@
     "group": "forward-all",
     "trigger": "send prices",
     "limit": 40,
-    "gapMs": 900
+    "gapMs": 900,
+    "groupId": "",
+    "groupName": ""
   },
   "noReply": {
     "enabled": true,

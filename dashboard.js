@@ -69,6 +69,11 @@ const asCount = (v, fallback, min, max) => {
   return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
 };
 
+/** Did the operator leave the template group name alone? */
+const sameGroup = (body, current) =>
+  String((body.forward && body.forward.group) ?? current.forward.group).trim().toLowerCase() ===
+  String(current.forward.group || '').trim().toLowerCase();
+
 function sanitise(body, current) {
   return {
     enabled          : asBool(body.enabled, current.enabled),
@@ -84,6 +89,11 @@ function sanitise(body, current) {
       trigger: asText(body.forward && body.forward.trigger, current.forward.trigger),
       limit  : asCount(body.forward && body.forward.limit, current.forward.limit, 1, 200),
       gapMs  : asCount(body.forward && body.forward.gapMs, current.forward.gapMs, 200, 10000),
+      /* Resolved by the bot, not typed by anyone — carried through so saving
+         the panel does not throw away the group it already found. Cleared
+         when the group name changes, so the id cannot outlive its name. */
+      groupId  : sameGroup(body, current) ? current.forward.groupId : '',
+      groupName: sameGroup(body, current) ? current.forward.groupName : '',
     },
     noReply: {
       enabled         : asBool(body.noReply && body.noReply.enabled, current.noReply.enabled),

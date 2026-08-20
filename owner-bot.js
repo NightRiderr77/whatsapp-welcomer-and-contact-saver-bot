@@ -255,6 +255,13 @@ const forwarder = createForwarder({
   note,
   log,
   onSent: (m) => rememberOwnSend(m),
+  /* Remember which group the name resolved to, so a restart does not have to
+     go looking again — and so a group that gets renamed is re-resolved rather
+     than silently pointing at the old one. */
+  rememberGroup: (groupId, groupName) => {
+    const s = loadSettings();
+    patchSettings({ forward: { ...s.forward, groupId, groupName } });
+  },
 });
 
 client.on('code', (code) => {

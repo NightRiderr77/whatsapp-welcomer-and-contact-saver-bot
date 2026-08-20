@@ -42,7 +42,7 @@ function normalise(text) {
     .trim();
 }
 
-function createForwarder({ client, loadSettings, note, log, onSent }) {
+function createForwarder({ client, loadSettings, note, log, onSent, rememberGroup }) {
   let groupCache = null;               // { id, name, at }
   let templateCache = null;            // { messages, at }
   const busy = new Set();              // chats mid-broadcast
@@ -58,12 +58,47 @@ function createForwarder({ client, loadSettings, note, log, onSent }) {
   };
 
   /**
-   * The template group, found once and remembered.
+   * Just the groups: their ids and their names, nothing else.
    *
-   * Every call below runs inside the WhatsApp page, so when one fails it fails
-   * with the page's own minified message — a bare "r" tells nobody anything.
-   * Each step therefore names itself, because the first time this broke the
-   * only evidence was `broadcast failed: r`.
+   * `client.getChats()` cannot be used here. It runs every chat on the account
+   * through the library's full chat serialiser inside a Promise.all, so a
+   * single chat that fails to model — a channel, a community, a contact that
+   * no longer resolves — rejects the whole call, and what comes back is one
+   * minified letter. On a live account with hundreds of chats that is not an
+   * edge case; it is what happens. It reported `could not list your chats (r)`
+   * for fifteen minutes straight.
+   *
+   * This asks the page for the two fields actually needed. Nothing is
+   * serialised, so nothing can poison the batch, and it is far cheaper than
+   * modelling every chat to read a name off one of them.
+   */
+  async function listGroups() {
+    try {
+      const groups = await client.pupPage.evaluate(() => {
+        const all = window.require('WAWebCollections').Chat.getModelsArray();
+        return all
+          .filter((c) => c && c.id && String(c.id._serialized || '').endsWith('@g.us'))
+          .map((c) => ({
+            id: c.id._serialized,
+            name: c.formattedTitle || c.name || (c.contact && c.contact.name) || '',
+          }));
+      });
+      if (Array.isArray(groups) && groups.length) return groups;
+    } catch (e) {
+      log('light group listing failed, falling back:', e.message || e);
+    }
+
+    // Fallback for a WhatsApp Web whose internals have moved. Same fragility
+    // as before, but now it is the second choice rather than the only one.
+    const chats = await client.getChats();
+    return chats
+      .filter((c) => c.isGroup)
+      .map((c) => ({ id: c.id._serialized, name: c.name || '' }));
+  }
+
+  /**
+   * The template group, found once and remembered — in settings, so a restart
+   * does not have to go looking again.
    */
   async function findGroup(name) {
     const wanted = normalise(name);
@@ -71,16 +106,22 @@ function createForwarder({ client, loadSettings, note, log, onSent }) {
       return groupCache;
     }
 
-    let chats;
-    try {
-      // The one expensive call, and only when the trigger is actually used.
-      chats = await client.getChats();
-    } catch (e) {
-      throw new Error(`could not list your chats (${e.message || e}). WhatsApp may still be loading — try again in a minute.`);
+    // An id we resolved on a previous run, for this same group name.
+    const saved = loadSettings().forward || {};
+    if (saved.groupId && normalise(saved.groupName || '') === wanted) {
+      groupCache = { id: saved.groupId, name: wanted, at: Date.now() };
+      templateCache = null;
+      return groupCache;
     }
 
-    const groups = chats.filter((ch) => ch.isGroup);
-    const hit = groups.find((ch) => normalise(ch.name) === wanted);
+    let groups;
+    try {
+      groups = await listGroups();
+    } catch (e) {
+      throw new Error(`could not read your group list (${e.message || e}).`);
+    }
+
+    const hit = groups.find((g) => normalise(g.name) === wanted);
     if (!hit) {
       groupCache = null;
       const names = groups.map((g) => g.name).filter(Boolean).slice(0, 8);
@@ -90,8 +131,9 @@ function createForwarder({ client, loadSettings, note, log, onSent }) {
       );
     }
 
-    groupCache = { id: hit.id._serialized, chat: hit, name: wanted, at: Date.now() };
+    groupCache = { id: hit.id, name: wanted, at: Date.now() };
     templateCache = null;              // a different group means a new template
+    if (rememberGroup) rememberGroup(hit.id, name);
     return groupCache;
   }
 
@@ -100,14 +142,20 @@ function createForwarder({ client, loadSettings, note, log, onSent }) {
     if (templateCache && Date.now() - templateCache.at < TEMPLATE_TTL) {
       return templateCache.messages;
     }
-    let raw;
+    let chat, raw;
     try {
-      // The Chat object from getChats() already knows how to do this; asking
-      // the client for the chat again is a second trip and a second thing that
-      // can fail.
-      raw = await group.chat.fetchMessages({ limit });
+      chat = await client.getChatById(group.id);
+      if (!chat) throw new Error('the group could not be opened');
     } catch (e) {
-      throw new Error(`could not read the "${group.name}" group (${e.message || e}).`);
+      // A stored id can go stale if the group was left or deleted.
+      groupCache = null;
+      if (rememberGroup) rememberGroup('', '');
+      throw new Error(`could not open the group (${e.message || e}). Try once more.`);
+    }
+    try {
+      raw = await chat.fetchMessages({ limit });
+    } catch (e) {
+      throw new Error(`could not read the group's messages (${e.message || e}).`);
     }
     const messages = raw
       // Only what the owner put there, and only if it carries something.
