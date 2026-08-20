@@ -186,14 +186,31 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
           msgs = [...older.filter(keep), ...msgs];
         }
 
-        return msgs.map((m) => ({
-          id: m.id._serialized,
-          fromMe: !!m.id.fromMe,
-          text: m.body || m.caption || '',
-          // How the library itself decides a message carries media.
-          hasMedia: Boolean(m.mediaKey && m.directPath),
-          t: m.t || 0,
-        }));
+        /* The id is a MsgKey, and `_serialized` is not always populated on the
+           raw model — when it is missing every later lookup is done with
+           `undefined`, which surfaces from IndexedDB as
+           "No key or key range specified". toString() gives the same string. */
+        const idOf = (m) => {
+          const raw = m.id && (m.id._serialized ||
+            (typeof m.id.toString === 'function' ? m.id.toString() : ''));
+          // A real one looks like `true_<chat>_<hash>`; anything else is not usable.
+          return typeof raw === 'string' && raw.includes('_') ? raw : '';
+        };
+
+        return msgs.map((m) => {
+          const hasMedia = Boolean(m.mediaKey && m.directPath);
+          return {
+            id: idOf(m),
+            fromMe: !!m.id.fromMe,
+            /* `body` is the message text only on a plain text message. On a
+               photo or video it holds the base64 thumbnail, and sending that
+               put a wall of gibberish in a customer's chat. The words on a
+               media message live in `caption`. */
+            text: hasMedia ? (m.caption || '') : (m.body || ''),
+            hasMedia,
+            t: m.t || 0,
+          };
+        }).filter((m) => m.id || m.text);
       }, group.id, Number(limit) || 40);
     } catch (e) {
       throw new Error(`could not read the group (${e.message || e}).`);
@@ -268,6 +285,7 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
    * is a map rather than a letter.
    */
   async function mediaOf(msgId) {
+    if (!msgId) throw new Error('WhatsApp did not give this message an id we can use');
     const result = await client.pupPage.evaluate(async (id) => {
       const problems = [];
       const say = (where, e) => problems.push(`${where}: ${(e && e.message) || e}`);
@@ -337,6 +355,21 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
   }
 
   /**
+   * Is this text, or is it a payload that leaked out of a field?
+   *
+   * A thumbnail sent as a message put several hundred characters of base64
+   * into a customer's chat. That must not be possible again by any route, so
+   * nothing that looks like encoded data is sent as text — whatever produced
+   * it. Real messages have spaces and line breaks; a base64 blob has neither.
+   */
+  function looksLikeData(text) {
+    const s = String(text || '');
+    if (s.length < 200) return false;                 // short enough to be words
+    if (/\s/.test(s.slice(0, 200))) return false;     // any whitespace early on
+    return /^[A-Za-z0-9+/=_-]+$/.test(s.slice(0, 200));
+  }
+
+  /**
    * Send the same content as a new message.
    *
    * The fallback for when forwarding is unavailable — which, on a WhatsApp Web
@@ -355,11 +388,11 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
            that came with it — the caption on these is usually the part that
            explains what the customer is looking at. */
         log('media could not be sent:', e.message);
-        if (!m.text) throw e;
+        if (!m.text || looksLikeData(m.text)) throw e;
         note(`one item is a file that could not be sent — its caption went instead (${e.message})`);
       }
     }
-    if (m.text) return client.sendMessage(toChatId, m.text);
+    if (m.text && !looksLikeData(m.text)) return client.sendMessage(toChatId, m.text);
     throw new Error('there was nothing in it that could be sent');
   }
 
