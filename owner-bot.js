@@ -31,6 +31,7 @@ const os     = require('os');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 const { startDashboard } = require('./dashboard');
+const { watchMemory } = require('./memory');
 const { createForwarder } = require('./forwarder');
 const { BRAND, banner } = require('./brand');
 
@@ -65,6 +66,12 @@ function note(text) {
  * "sorry for the wait" into a few hundred old chats at once.
  */
 const STARTED_AT = Math.floor(Date.now() / 1000);
+
+/* When the bot last had something real to do. The memory watcher will not
+   restart the process while a conversation is in the middle of happening. */
+let lastBusyAt = Date.now();
+const touch = () => { lastBusyAt = Date.now(); };
+const QUIET_MS = 10 * 60_000;
 
 /**
  * Settings live in the state directory, not next to the code.
@@ -224,7 +231,17 @@ function remember(set, file, id) {
 }
 
 // ─── WhatsApp client ─────────────────────────────────────────────────────────
-// Chromium flags tuned for a small VPS; this may be sharing a box.
+/* Chromium flags tuned for a small VPS; this may be sharing a box.
+
+   The two that matter most on an account with a lot of chats:
+
+     --disable-features=site-per-process  keeps WhatsApp in ONE renderer
+       instead of a process per frame. Several hundred megabytes on its own.
+     --blink-settings=imagesEnabled=false stops the page decoding every avatar
+       and every thumbnail into a bitmap. Nobody is looking at this tab, and
+       the bot never reads an image off the DOM — media is downloaded and
+       decrypted through WhatsApp's own transport, and the QR arrives as text.
+       Set IMAGES=on if a future WhatsApp Web ever needs them back. */
 const LOW_MEM_CHROME_ARGS = [
   '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
   '--disable-accelerated-2d-canvas', '--no-first-run', '--no-zygote', '--disable-gpu',
@@ -232,9 +249,21 @@ const LOW_MEM_CHROME_ARGS = [
   '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
   '--disable-default-apps', '--disable-sync', '--disable-translate', '--mute-audio',
   '--no-default-browser-check', '--metrics-recording-only',
-  '--disable-features=site-per-process,TranslateUI,BlinkGenPropertyTrees',
+  // One renderer, and no spare processes kept warm for tabs that never open.
+  '--disable-features=site-per-process,TranslateUI,BlinkGenPropertyTrees,OptimizationHints,MediaRouter,AudioServiceOutOfProcess',
+  '--renderer-process-limit=1',
+  '--disable-software-rasterizer', '--disable-breakpad', '--no-pings',
+  '--disable-component-extensions-with-background-pages',
+  '--disable-client-side-phishing-detection', '--disable-domain-reliability',
+  '--disable-print-preview', '--disable-hang-monitor',
+  // Caches that otherwise grow to whatever the disk allows. 32MB each.
+  '--disk-cache-size=33554432', '--media-cache-size=33554432',
   '--js-flags=--max-old-space-size=512',
 ];
+
+if (String(process.env.IMAGES || 'off').toLowerCase() !== 'on') {
+  LOW_MEM_CHROME_ARGS.push('--blink-settings=imagesEnabled=false');
+}
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: SESSION_PATH }),
@@ -450,6 +479,7 @@ async function saveContact(chatId, contact, name) {
 client.on('message', async (msg) => {
   try {
     if (msg.from === 'status@broadcast' || msg.fromMe) return;
+    touch();
     if (typeof msg.from === 'string' && msg.from.endsWith('@g.us')) return; // groups are not customers
 
     /* History, not news. WhatsApp replays unread messages when a client links,
@@ -497,6 +527,7 @@ client.on('message', async (msg) => {
 // ─── The owner replying stops the clock ──────────────────────────────────────
 client.on('message_create', async (msg) => {
   if (!msg.fromMe) return;
+  touch();
   if (typeof msg.to === 'string' && msg.to.endsWith('@g.us')) return;
   const id = msg.id && msg.id._serialized;
   if (id && botSentIds.has(id)) { botSentIds.delete(id); return; } // our own send, not a reply
@@ -656,6 +687,18 @@ function clearStaleProfileLock() {
   }
 }
 
+// ─── Memory ──────────────────────────────────────────────────────────────────
+/* WhatsApp Web grows with the number of chats on the account and never gives
+   any of it back on its own, because a headless tab is never under memory
+   pressure. This asks it to, on a timer. See memory.js. */
+const memory = watchMemory({
+  client,
+  log,
+  note,
+  // Never mid-broadcast, and not while a conversation is live.
+  isIdle: () => forwarder.status().running === 0 && Date.now() - lastBusyAt > QUIET_MS,
+});
+
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 const dashboard = startDashboard({
   port: DASH_PORT,
@@ -678,6 +721,7 @@ const dashboard = startDashboard({
       // Only those still owed a reply; the chased ones linger for a day.
       pending          : [...pending.values()].filter((p) => !p.notified).length,
       forward          : forwarder.status(),
+      memory           : memory.status(),
       activity,
     };
   },

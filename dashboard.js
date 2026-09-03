@@ -140,7 +140,7 @@ const PAGE = String.raw`<!doctype html>
   .fault .path{color:var(--bad)}
   .path{font:11px/1.5 var(--mono);color:var(--muted);word-break:break-all}
   /* The four numbers most likely to reveal something is wrong. */
-  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);
     border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:14px}
   .stat{background:var(--panel);padding:13px 10px;text-align:center}
   .stat b{display:block;font:600 20px/1.2 var(--mono);letter-spacing:-.02em}
@@ -208,6 +208,7 @@ const PAGE = String.raw`<!doctype html>
   <div class="stat"><b id="sSaved">–</b><span>Saved</span></div>
   <div class="stat"><b id="sGreeted">–</b><span>Greeted</span></div>
   <div class="stat"><b id="sPending">–</b><span>Waiting</span></div>
+  <div class="stat"><b id="sMem">–</b><span>Memory</span></div>
 </div>
 
 <div class="card">
@@ -298,6 +299,19 @@ function paintStatus(st) {
   $('sSaved').textContent   = st.saved;
   $('sGreeted').textContent = st.greeted;
   $('sPending').textContent = st.pending;
+
+  /* Memory. Amber once a sweep is being run on every check, red once we are
+     into the range where the bot restarts itself to clear it. */
+  var mem = st.memory || {};
+  var memEl = $('sMem');
+  if (mem.usedMb == null) { memEl.textContent = '–'; memEl.style.color = ''; }
+  else {
+    memEl.textContent = mem.usedMb + 'M';
+    memEl.title = 'sweeps above ' + mem.softMb + 'M, restarts above ' + mem.hardMb + 'M'
+      + (mem.lastSweep ? ' — last sweep ' + new Date(mem.lastSweep).toLocaleTimeString() : '');
+    memEl.style.color = mem.usedMb >= mem.hardMb ? 'var(--bad)'
+      : mem.usedMb >= mem.softMb ? 'var(--accent)' : '';
+  }
 
   // The check that would have caught "everyone is Cus 1".
   $('health').hidden = st.settingsOk;

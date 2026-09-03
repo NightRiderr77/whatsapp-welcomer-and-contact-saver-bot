@@ -243,6 +243,79 @@ docker stats --no-stream
 
 ---
 
+## If it is using too much memory
+
+Most of what the bot uses is not the bot — it is the browser holding your
+WhatsApp. **The more chats on the account, the more it holds**, and it never
+gives any of it back on its own.
+
+The bot already handles this for you. Every 5 minutes it checks:
+
+| Memory | What the bot does |
+|---|---|
+| Under 650 MB | Nothing |
+| Over 650 MB | Asks the browser to clean up |
+| Over 1000 MB | Cleans up harder |
+| Still over 1000 MB | Restarts itself |
+
+A restart takes a few seconds and **you do not have to scan the QR again** —
+the login is saved on the server. It never restarts in the middle of sending
+someone your price list.
+
+You can watch the number on your control panel: the **Memory** box turns
+orange when it is cleaning up and red when it is about to restart.
+
+### Making it use less
+
+Open your settings file:
+
+```bash
+nano ~/welcomer-bot/.env
+```
+
+Add these lines. The numbers below suit a **1 GB server**:
+
+```
+MEM_SOFT_MB=450
+MEM_HARD_MB=700
+```
+
+On a bigger server you can go the other way — `MEM_SOFT_MB=1200` and
+`MEM_HARD_MB=1800` — so it cleans up less often.
+
+Save with **Ctrl+X**, **Y**, **Enter**, then:
+
+```bash
+cd ~/welcomer-bot && docker compose up -d
+```
+
+### Give the server some swap
+
+This is the single best thing you can do on a small VPS. It gives the server
+spare room so a busy moment never kills anything. **Run this once:**
+
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab
+```
+
+Check it worked:
+
+```bash
+free -h
+```
+
+### The rest of it is on your phone
+
+The browser holds every chat your WhatsApp has. Deleting old customer chats
+you no longer need — on the phone — is the only thing that makes the list
+itself smaller. Archiving does not help; the chat is still there.
+
+> **Still never add a `memory:` limit to `docker-compose.yml`.** The bot
+> clearing memory early is safe. A limit kills the browser instead, and that
+> ends with WhatsApp unlinking your phone.
+
+---
+
 ## Moving to another server
 
 Three things must come with you, or you will be scanning a QR again and

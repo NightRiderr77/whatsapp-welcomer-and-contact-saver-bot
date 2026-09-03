@@ -22,6 +22,21 @@ services:
       # — it listens on a public port, so "no password" would mean "no lock".
       - DASH_PASSWORD=${DASH_PASSWORD:?set DASH_PASSWORD in .env before starting}
       # - PAIR_NUMBER=947XXXXXXXX   # link with an 8-digit code instead of a QR
+      #
+      # Memory. WhatsApp Web holds a model of every chat on the account and
+      # never hands any of it back on its own, so the bot asks it to: above
+      # the soft mark it forces a garbage collection, above the hard mark it
+      # purges the browser caches too, and if that still does not help it
+      # restarts itself. The login is on disk, so a restart costs seconds.
+      # Raise these on a bigger box; lower them on a 1GB one.
+      - MEM_SOFT_MB=${MEM_SOFT_MB:-650}
+      - MEM_HARD_MB=${MEM_HARD_MB:-1000}
+      - MEM_CHECK_MINUTES=${MEM_CHECK_MINUTES:-5}
+      # Set to off to be told about high memory instead of acting on it.
+      - MEM_RESTART=${MEM_RESTART:-on}
+      # Chromium does not decode avatars or thumbnails, which is most of what
+      # a long chat list costs. Set to on only if WhatsApp Web ever needs them.
+      - IMAGES=${IMAGES:-off}
     ports:
       # The owner panel. Change the left-hand side to 127.0.0.1:8091 to keep it
       # off the internet and reach it over an SSH tunnel instead.
