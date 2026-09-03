@@ -26,6 +26,7 @@
  * device. Reclaiming early beats being killed late.
  */
 const fs = require('fs');
+const os = require('os');
 
 const MB = 1024 * 1024;
 
@@ -134,6 +135,48 @@ function sweeper({ client, log }) {
   };
 }
 
+/* ── How much room there is ──────────────────────────────────────────────── */
+
+/**
+ * What this container is allowed to use.
+ *
+ * The cgroup limit if one is set, otherwise the whole machine. An unlimited
+ * cgroup reports a number the size of the address space, so anything absurd is
+ * treated as "no limit" and the host total is used instead.
+ */
+function availableBytes() {
+  for (const file of [
+    '/sys/fs/cgroup/memory.max',
+    '/sys/fs/cgroup/memory/memory.limit_in_bytes',
+  ]) {
+    let raw;
+    try { raw = fs.readFileSync(file, 'utf8').trim(); } catch { continue; }
+    const limit = Number(raw);
+    if (Number.isFinite(limit) && limit > 0 && limit < os.totalmem() * 4) return limit;
+  }
+  return os.totalmem();
+}
+
+const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+
+/**
+ * Where to sweep and where to give up, for THIS machine.
+ *
+ * These were hardcoded at 650MB and 1000MB, which is about right for the 1-2GB
+ * VPS the bot was written on and plainly wrong anywhere else: on a 6GB box it
+ * meant a garbage collection every five minutes, forever, over a browser that
+ * was using an eighth of the machine and bothering nobody. The marks are the
+ * machine's size now, with floors so a tiny box still gets swept and ceilings
+ * so a big one does not sit on two gigabytes of dead chat list.
+ */
+function defaultMarks(total = availableBytes()) {
+  const mb = total / MB;
+  const soft = Math.round(clamp(mb * 0.30, 400, 1500));
+  const hard = Math.round(clamp(mb * 0.50, 650, 2500));
+  // A hard mark at or below the soft one would restart on the first sweep.
+  return { soft, hard: Math.max(hard, soft + 250) };
+}
+
 /* ── The watcher ─────────────────────────────────────────────────────────── */
 
 const num = (value, fallback) => {
@@ -159,8 +202,9 @@ function watchMemory({
   exit = (code) => process.exit(code),
   settleMs = 5000,
 }) {
-  const softMb = num(process.env.MEM_SOFT_MB, 650);
-  const hardMb = num(process.env.MEM_HARD_MB, 1000);
+  const marks = defaultMarks();
+  const softMb = num(process.env.MEM_SOFT_MB, marks.soft);
+  const hardMb = Math.max(num(process.env.MEM_HARD_MB, marks.hard), softMb + 100);
   const everyMs = num(process.env.MEM_CHECK_MINUTES, 5) * 60_000;
   const mayRestart = String(process.env.MEM_RESTART || 'on').toLowerCase() !== 'off';
 
@@ -217,6 +261,9 @@ function watchMemory({
     client.destroy().catch(() => {}).finally(() => exit(0));
   }
 
+  log(`memory: ${asMb(availableBytes())}MB available — sweeping above ${softMb}MB, `
+    + `${mayRestart ? `restarting above ${hardMb}MB` : 'restarts disabled'}, every ${everyMs / 60_000}min`);
+
   const timer = setInterval(() => {
     tick().catch((e) => log('memory check failed:', e.message));
   }, everyMs);
@@ -236,4 +283,4 @@ function watchMemory({
   };
 }
 
-module.exports = { watchMemory, usedBytes, asMb, parseCgroup };
+module.exports = { watchMemory, usedBytes, asMb, parseCgroup, defaultMarks, availableBytes };

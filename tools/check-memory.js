@@ -6,14 +6,14 @@
 'use strict';
 const assert = require('assert');
 const path = require('path');
-const { watchMemory, usedBytes, asMb, parseCgroup } = require(path.join(__dirname, '..', 'memory.js'));
+const { watchMemory, usedBytes, asMb, parseCgroup, defaultMarks } = require(path.join(__dirname, '..', 'memory.js'));
 
 const MB = 1024 * 1024;
 let passed = 0;
 const ok = (name) => { passed++; console.log('  ok  ' + name); };
 
 /** A watcher fed a scripted series of readings, with a fake page. */
-function harness({ series, idle = true, restart = 'on', pageBroken = false }) {
+function harness({ series, idle = true, restart = 'on', pageBroken = false, keepEnv = false }) {
   const calls = [];
   const notes = [];
   const logs = [];
@@ -35,8 +35,10 @@ function harness({ series, idle = true, restart = 'on', pageBroken = false }) {
     destroy: async () => { calls.push('destroy'); },
   };
 
-  process.env.MEM_SOFT_MB = '650';
-  process.env.MEM_HARD_MB = '1000';
+  if (!keepEnv) {
+    process.env.MEM_SOFT_MB = '650';
+    process.env.MEM_HARD_MB = '1000';
+  }
   process.env.MEM_RESTART = restart;
 
   const w = watchMemory({
@@ -151,6 +153,37 @@ function harness({ series, idle = true, restart = 'on', pageBroken = false }) {
     assert.strictEqual(sweeps, 1, 'the second check should have been skipped');
     h.w.stop();
     ok('a check that lands on top of a running one is skipped');
+  }
+
+  /* The marks follow the machine. They used to be 650/1000 everywhere, which
+     on a 6GB box meant a garbage collection every five minutes forever. */
+  {
+    const small = defaultMarks(1 * 1024 * MB);
+    const mid = defaultMarks(2 * 1024 * MB);
+    const big = defaultMarks(5.786 * 1024 * MB);
+
+    assert.deepStrictEqual(small, { soft: 400, hard: 650 }, JSON.stringify(small));
+    assert.ok(mid.soft > small.soft && big.soft > mid.soft, 'bigger box, higher marks');
+    assert.ok(big.soft >= 1500, 'a 6GB box should not sweep at 807MB: ' + big.soft);
+
+    for (const total of [0.25, 0.5, 1, 2, 4, 8, 64]) {
+      const m = defaultMarks(total * 1024 * MB);
+      assert.ok(m.hard > m.soft, total + 'GB gave hard <= soft');
+      assert.ok(m.soft >= 400 && m.hard <= 2500, total + 'GB left the bounds');
+    }
+    ok('the marks are read off the machine, with floors and ceilings that hold');
+  }
+
+  /* A hard mark set below the soft one would restart on the very first sweep. */
+  {
+    process.env.MEM_SOFT_MB = "900";
+    process.env.MEM_HARD_MB = "300";
+    const h = harness({ series: [100], keepEnv: true });
+    await h.w.check();
+    const st = h.w.status();
+    assert.ok(st.hardMb > st.softMb, 'hard ' + st.hardMb + ' soft ' + st.softMb);
+    h.w.stop();
+    ok('a hard mark set below the soft one is pushed back above it');
   }
 
   /* Reading the cgroup: reclaimable page cache must not count against us. */

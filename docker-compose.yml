@@ -28,9 +28,13 @@ services:
       # the soft mark it forces a garbage collection, above the hard mark it
       # purges the browser caches too, and if that still does not help it
       # restarts itself. The login is on disk, so a restart costs seconds.
-      # Raise these on a bigger box; lower them on a 1GB one.
-      - MEM_SOFT_MB=${MEM_SOFT_MB:-650}
-      - MEM_HARD_MB=${MEM_HARD_MB:-1000}
+      #
+      # Left empty on purpose. The bot reads the size of this machine and
+      # picks its own marks — roughly 30% and 50% of what it is allowed to
+      # use. Set them in .env only to overrule that; the startup log says
+      # which numbers are in force.
+      - MEM_SOFT_MB=${MEM_SOFT_MB:-}
+      - MEM_HARD_MB=${MEM_HARD_MB:-}
       - MEM_CHECK_MINUTES=${MEM_CHECK_MINUTES:-5}
       # Set to off to be told about high memory instead of acting on it.
       - MEM_RESTART=${MEM_RESTART:-on}

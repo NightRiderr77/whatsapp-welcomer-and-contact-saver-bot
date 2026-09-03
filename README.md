@@ -249,14 +249,22 @@ Most of what the bot uses is not the bot — it is the browser holding your
 WhatsApp. **The more chats on the account, the more it holds**, and it never
 gives any of it back on its own.
 
-The bot already handles this for you. Every 5 minutes it checks:
+The bot already handles this for you. Every 5 minutes it checks itself, and
+it works out the right numbers from **the size of your server** — a bigger
+server is simply allowed to use more:
 
-| Memory | What the bot does |
-|---|---|
-| Under 650 MB | Nothing |
-| Over 650 MB | Asks the browser to clean up |
-| Over 1000 MB | Cleans up harder |
-| Still over 1000 MB | Restarts itself |
+| Your server | Cleans up above | Restarts above |
+|---|---|---|
+| 1 GB | 400 MB | 650 MB |
+| 2 GB | 614 MB | 1024 MB |
+| 4 GB | 1229 MB | 2048 MB |
+| 6 GB or more | 1500 MB | 2500 MB |
+
+The exact numbers it picked are printed when it starts:
+
+```bash
+cd ~/welcomer-bot && docker compose logs | grep "memory:"
+```
 
 A restart takes a few seconds and **you do not have to scan the QR again** —
 the login is saved on the server. It never restarts in the middle of sending
@@ -265,23 +273,24 @@ someone your price list.
 You can watch the number on your control panel: the **Memory** box turns
 orange when it is cleaning up and red when it is about to restart.
 
-### Making it use less
+> **Using 800 MB is not a problem.** What matters is the share of the server,
+> not the number. Check it with `docker stats --no-stream` — if the **MEM %**
+> column is comfortably under 50%, there is nothing to fix.
 
-Open your settings file:
+### Overruling it
+
+Only if you want to. Open your settings file:
 
 ```bash
 nano ~/welcomer-bot/.env
 ```
 
-Add these lines. The numbers below suit a **1 GB server**:
+Add these two lines and pick your own numbers:
 
 ```
-MEM_SOFT_MB=450
-MEM_HARD_MB=700
+MEM_SOFT_MB=1500
+MEM_HARD_MB=2500
 ```
-
-On a bigger server you can go the other way — `MEM_SOFT_MB=1200` and
-`MEM_HARD_MB=1800` — so it cleans up less often.
 
 Save with **Ctrl+X**, **Y**, **Enter**, then:
 
