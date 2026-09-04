@@ -55,6 +55,23 @@ services:
       # to be mounted as a file: one missing file made every read fail, the bot
       # fell back to defaults, and every customer was saved as "Cus 1".
       - ./state:/app/state
+    # ── Sharing the box ──────────────────────────────────────────────────
+    # This server also runs 3x-ui / xray, and that is the actual product:
+    # a customer losing their VPN matters, the bot missing a greeting does
+    # not. Both settings below only ever apply when the two are competing,
+    # so on a quiet box they change nothing.
+
+    # Half the weight of everything else when the CPU is contended. Chromium
+    # is greedy for the first half-minute after a restart, and xray should
+    # not be waiting behind it.
+    cpu_shares: 512
+
+    # If the host ever runs out of memory, the kernel picks a victim by score.
+    # This volunteers the bot, so xray is not what gets killed. It should
+    # never come to this — add swap, see the README — but the ordering should
+    # be a decision rather than a coin toss.
+    oom_score_adj: 500
+
     deploy:
       resources:
         limits:

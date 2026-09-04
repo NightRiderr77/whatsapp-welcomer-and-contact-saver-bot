@@ -325,6 +325,64 @@ itself smaller. Archiving does not help; the chat is still there.
 
 ---
 
+## Sharing the server with 3x-ui (or anything else)
+
+**Restarting the bot does not touch anything else on the server.** The bot
+lives inside its own container. Your panel and your VPN run outside it, on the
+server itself, and never see the bot start or stop. Nobody gets disconnected.
+
+The only way the bot could ever affect them is by taking something they need —
+memory, or the processor — so it is set up to lose that argument on purpose:
+
+| If they compete for | What happens |
+|---|---|
+| The processor | Your VPN goes first, the bot waits |
+| Memory | The bot is killed, never your VPN |
+
+These only apply when there is a genuine shortage. On a normal day nothing is
+competing and neither setting does anything.
+
+**Add swap so it never comes to that.** One command, once:
+
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab
+```
+
+### Check nothing wants the same port
+
+The bot uses port **8091** for your control panel. Before you start it:
+
+```bash
+sudo ss -lntp | grep 8091
+```
+
+**No output is good** — nothing else is using it. If something answers, change
+the left-hand number in `docker-compose.yml` (`"8091:8091"` to `"8092:8091"`)
+and use that instead.
+
+### Your control panel is open to the internet
+
+Docker opens port 8091 to everyone, and it does this **underneath your
+firewall** — a `ufw deny` rule will not stop it. Your password is the only
+thing protecting it, so make that password long.
+
+To close it off completely instead, edit `docker-compose.yml`:
+
+```bash
+nano ~/welcomer-bot/docker-compose.yml
+```
+
+Change `- "8091:8091"` to `- "127.0.0.1:8091:8091"`, save, then
+`docker compose up -d`. The panel is now reachable only from the server
+itself. To open it on your own computer, run this **on your computer** and
+then visit `http://localhost:8091`:
+
+```bash
+ssh -L 8091:127.0.0.1:8091 root@YOUR-SERVER-IP
+```
+
+---
+
 ## Moving to another server
 
 Three things must come with you, or you will be scanning a QR again and
