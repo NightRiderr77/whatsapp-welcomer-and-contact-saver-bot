@@ -8,7 +8,7 @@
   "private": true,
   "scripts": {
     "start": "node owner-bot.js",
-    "test": "node tools/check-image.js && node tools/check-memory.js"
+    "test": "node tools/check-image.js && node tools/check-memory.js && node tools/check-settings.js"
   },
   "engines": {
     "node": ">=18"

@@ -2,6 +2,7 @@
   "enabled": true,
   "autoSaveContacts": true,
   "contactNextNumber": 1,
+  "contactSaveDelayMinutes": 0,
   "invite": {
     "enabled": true,
     "message": "👋 *Welcome to PXN STORES!*\n\nJoin our official WhatsApp group for updates & offers:\n👉 https://chat.whatsapp.com/YOUR-GROUP-INVITE-CODE"

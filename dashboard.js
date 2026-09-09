@@ -65,6 +65,12 @@ const asBool = (v, fallback) => (typeof v === 'boolean' ? v : fallback);
 const asText = (v, fallback) =>
   typeof v === 'string' ? v.slice(0, MAX_MESSAGE_CHARS) : fallback;
 const asCount = (v, fallback, min, max) => {
+  /* Reject the shape before the value. Number(null), Number(''), Number([])
+     and Number(false) are all 0 — harmless while every counter here had a
+     minimum of 1 and 0 fell out of range, and not harmless at all for the
+     save delay, where 0 is a real setting meaning "save immediately". A
+     missing field would have quietly switched the delay off. */
+  if (typeof v !== 'number' && (typeof v !== 'string' || v.trim() === '')) return fallback;
   const n = Math.floor(Number(v));
   return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
 };
@@ -79,6 +85,9 @@ function sanitise(body, current) {
     enabled          : asBool(body.enabled, current.enabled),
     autoSaveContacts : asBool(body.autoSaveContacts, current.autoSaveContacts),
     contactNextNumber: asCount(body.contactNextNumber, current.contactNextNumber, 1, 10_000_000),
+    // 0 means save on their first message, which is how this always worked.
+    contactSaveDelayMinutes: asCount(
+      body.contactSaveDelayMinutes, current.contactSaveDelayMinutes ?? 0, 0, 1440),
     invite: {
       enabled: asBool(body.invite && body.invite.enabled, current.invite.enabled),
       message: asText(body.invite && body.invite.message, current.invite.message),
@@ -218,13 +227,17 @@ const PAGE = String.raw`<!doctype html>
   <label for="cnext">Next number</label>
   <input type="number" id="cnext" min="1">
   <div class="hint">The bot increments this itself. If it never moves, it isn’t reading the settings file.</div>
+  <label for="cdelay">Wait before saving (minutes)</label>
+  <input type="number" id="cdelay" min="0" max="1440">
+  <div class="hint" id="cdelayHint">0 saves them the moment they message.</div>
 </div>
 
 <div class="card">
-  <h2>Group invite</h2>
+  <h2>Welcome message</h2>
   <label class="sw"><input type="checkbox" id="invEnabled"> Send on someone’s first ever message</label>
   <label for="invMsg">Message</label>
   <textarea id="invMsg" placeholder="Leave empty and nothing is sent."></textarea>
+  <div class="hint">Never sent to anyone already in your phone’s contacts, whatever they are saved as.</div>
 </div>
 
 <div class="card">
@@ -280,6 +293,7 @@ function paintSettings(s) {
   $('enabled').checked    = s.enabled;
   $('autoSave').checked   = s.autoSaveContacts;
   $('cnext').value        = s.contactNextNumber;
+  $('cdelay').value       = s.contactSaveDelayMinutes || 0;
   $('invEnabled').checked = s.invite.enabled;
   $('invMsg').value       = s.invite.message;
   $('nrEnabled').checked  = s.noReply.enabled;
@@ -299,6 +313,15 @@ function paintStatus(st) {
   $('sSaved').textContent   = st.saved;
   $('sGreeted').textContent = st.greeted;
   $('sPending').textContent = st.pending;
+
+  /* The waiting room. A delay with nothing visible behind it looks broken
+     the first time somebody messages and no contact appears. */
+  var waiting = st.waitingToSave || 0;
+  var delay = st.saveDelayMinutes || 0;
+  $('cdelayHint').textContent = delay
+    ? (waiting === 1 ? '1 person is waiting out the ' + delay + '-minute wait.'
+                     : waiting + ' people are waiting out the ' + delay + '-minute wait.')
+    : '0 saves them the moment they message.';
 
   /* Memory. Amber once a sweep is being run on every check, red once we are
      into the range where the bot restarts itself to clear it. */
@@ -364,6 +387,7 @@ $('save').onclick = async () => {
       enabled: $('enabled').checked,
       autoSaveContacts: $('autoSave').checked,
       contactNextNumber: +$('cnext').value,
+      contactSaveDelayMinutes: +$('cdelay').value,
       invite:  { enabled: $('invEnabled').checked, message: $('invMsg').value },
       noReply: { enabled: $('nrEnabled').checked, minutes: +$('nrMin').value,
                  firstContactOnly: $('nrFirst').checked, message: $('nrMsg').value },
@@ -531,4 +555,6 @@ function startDashboard(opts) {
   return server;
 }
 
-module.exports = { startDashboard };
+// sanitise is exported for tools/check-settings.js — the panel is the one
+// place an operator can type a number straight into the running bot.
+module.exports = { startDashboard, sanitise };

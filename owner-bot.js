@@ -8,7 +8,8 @@
  * involve answering anybody on your behalf:
  *
  *   1. Saves a new customer to the phone's address book as "Cus <N>".
- *   2. Sends the group invite once, on their first ever message.
+ *   2. Sends the welcome message once, on their first ever message —
+ *      and only to somebody who is not already in the address book.
  *   3. Chases a customer you haven't replied to within N minutes.
  *   4. Sends a whole template group to a customer when you type one phrase.
  *
@@ -32,6 +33,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 const { startDashboard } = require('./dashboard');
 const { watchMemory } = require('./memory');
+const { shouldWelcome, saveDueAt } = require('./rules');
 const { createForwarder } = require('./forwarder');
 const { BRAND, banner } = require('./brand');
 
@@ -93,6 +95,12 @@ const DEFAULTS = {
   enabled          : true,
   autoSaveContacts : true,
   contactNextNumber: 1,
+  /* How long to wait before writing a new customer into the address book.
+     Zero saves on their first message, which is what this always did. A wait
+     means only people who are still there after it get a slot — a wrong
+     number who says "sorry" and leaves never takes one, and the address book
+     stops filling up with one-message strangers. */
+  contactSaveDelayMinutes: 0,
   invite: {
     enabled: false,       // stays off until a real invite message is configured
     message: '',
@@ -215,8 +223,34 @@ fs.mkdirSync(STATE_DIR, { recursive: true });
 ensureSettingsFile();
 const GREETED_FILE = path.join(STATE_DIR, 'greeted.json');
 const SAVED_FILE   = path.join(STATE_DIR, 'saved-contacts.json');
+const WAITING_FILE = path.join(STATE_DIR, 'waiting-to-save.json');
 const greeted = loadIdSet(GREETED_FILE);
 const saved   = loadIdSet(SAVED_FILE);
+
+/* Customers who have messaged but whose save is still waiting out the delay:
+   chatId -> { at, name }. On disk as well as in memory, because a restart
+   during the wait would otherwise drop them silently — and someone who never
+   messages again would never be saved at all. */
+const waitingToSave = loadWaiting();
+
+function loadWaiting() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(WAITING_FILE, 'utf8'));
+    return new Map(Array.isArray(raw.waiting) ? raw.waiting.map((w) => [w.id, w]) : []);
+  } catch {
+    return new Map();
+  }
+}
+
+function writeWaiting() {
+  try {
+    fs.writeFileSync(WAITING_FILE, JSON.stringify({
+      waiting: [...waitingToSave.entries()].map(([id, w]) => ({ id, ...w })),
+    }));
+  } catch (e) {
+    log('could not write', path.basename(WAITING_FILE) + ':', e.message);
+  }
+}
 
 function remember(set, file, id) {
   if (set.has(id)) return;
@@ -330,7 +364,7 @@ let announced = '';
 client.on('ready', () => {
   const s = loadSettings();
   const summary = [
-    `contacts=${s.autoSaveContacts ? 'on' : 'off'}`,
+    `contacts=${s.autoSaveContacts ? 'on' : 'off'}${s.autoSaveContacts && s.contactSaveDelayMinutes ? ` after ${s.contactSaveDelayMinutes}m` : ''}`,
     `invite=${s.invite.enabled && s.invite.message ? 'on' : 'off'}`,
     `no-reply=${s.noReply.enabled ? s.noReply.minutes + 'm' : 'off'}`,
     `broadcast=${s.forward.enabled && s.forward.trigger ? '"' + s.forward.trigger + '"' : 'off'}`,
@@ -436,12 +470,47 @@ function serialised(fn) {
   return run;
 }
 
-async function saveContact(chatId, contact, name) {
+/**
+ * Put a customer in the queue, or save them now if there is no delay set.
+ *
+ * The delay is the point at which "they messaged" becomes "they are a
+ * customer". Somebody who sends one message and disappears — a wrong number,
+ * a bot, a person who found the number by accident — should not end up in the
+ * address book, and before this every one of them did.
+ */
+async function queueSave(chatId, name) {
+  if (saved.has(chatId) || waitingToSave.has(chatId)) return;
+
+  const at = saveDueAt(loadSettings().contactSaveDelayMinutes);
+  if (at === null) return saveContact(chatId, name);
+
+  waitingToSave.set(chatId, { at, name });
+  writeWaiting();
+}
+
+/** Anyone whose wait is up. Called from the sweep. */
+async function saveAnyoneDue() {
+  const now = Date.now();
+  for (const [chatId, w] of waitingToSave) {
+    if (now < w.at) continue;
+    waitingToSave.delete(chatId);
+    writeWaiting();
+    await saveContact(chatId, w.name);
+  }
+}
+
+async function saveContact(chatId, name) {
   if (saved.has(chatId) || savingNow.has(chatId)) return;
   savingNow.add(chatId);
   try {
     await serialised(async () => {
       if (saved.has(chatId)) return;              // settled while we queued
+
+      /* Asked for now, not when the message arrived. With a delay set that
+         was minutes ago, and the owner may well have saved them by hand in
+         the meantime — which is exactly the case this must not overwrite. */
+      let contact = null;
+      try { contact = await client.getContactById(chatId); } catch { /* gone */ }
 
       // Already in the phone's address book, under any name at all. Remember
       // it so we never ask again, and leave the name alone.
@@ -499,6 +568,13 @@ client.on('message', async (msg) => {
     // Never seen before by either half of the bot: this is a first contact.
     const isFirstContact = !saved.has(chatId) && !greeted.has(chatId);
 
+    /* Is this somebody the owner already knows? Read BEFORE the save below,
+       because that save is what makes it true — ask afterwards and every new
+       customer looks like an old one. `isMyContact` covers anyone in the
+       phone's address book whatever they are called; `saved` covers the ones
+       this bot has handled on a phone whose address book it cannot see. */
+    const alreadyKnown = Boolean(contact && contact.isMyContact) || saved.has(chatId);
+
     /* Start (or refresh) the reply clock. Refreshed only while we have not
        chased them yet — otherwise a customer who keeps typing resets the timer
        forever and never gets the message. */
@@ -506,9 +582,10 @@ client.on('message', async (msg) => {
     if (!cur) pending.set(chatId, { ts: Date.now(), name, notified: false, isFirstContact });
     else if (!cur.notified) { cur.ts = Date.now(); cur.name = name; }
 
-    if (s.autoSaveContacts) await saveContact(chatId, contact, name);
+    if (s.autoSaveContacts) await queueSave(chatId, name);
 
-    if (s.invite.enabled && s.invite.message && !greeted.has(chatId)) {
+    // See rules.js. `alreadyKnown` was read above, before the save.
+    if (shouldWelcome({ invite: s.invite, alreadyKnown, alreadyGreeted: greeted.has(chatId) })) {
       // Marked before sending: a send that half-succeeds must not invite them
       // a second time on their next message.
       remember(greeted, GREETED_FILE, chatId);
@@ -555,6 +632,11 @@ const FORGET_MS = 24 * 60 * 60 * 1000; // drop chased chats after a day
 
 setInterval(async () => {
   const s = loadSettings();
+
+  // Anyone whose save delay has run out. Its own try/catch: a save that fails
+  // must not stop the chase below from running.
+  try { await saveAnyoneDue(); } catch (e) { log('delayed save failed:', e.message); }
+
   const waitMs = Math.max(1, Number(s.noReply.minutes) || 10) * 60_000;
   const now = Date.now();
 
@@ -717,6 +799,8 @@ const dashboard = startDashboard({
       settingsFile     : SETTINGS_FILE,
       contactNextNumber: s.contactNextNumber,
       saved            : saved.size,
+      waitingToSave    : waitingToSave.size,
+      saveDelayMinutes : Number(s.contactSaveDelayMinutes) || 0,
       greeted          : greeted.size,
       // Only those still owed a reply; the chased ones linger for a day.
       pending          : [...pending.values()].filter((p) => !p.notified).length,

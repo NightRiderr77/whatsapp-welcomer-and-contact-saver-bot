@@ -17,7 +17,7 @@ your own WhatsApp and handles the boring parts.
 
 1. **Saves the customer.** Every new number gets saved to your phone as
    `Cus 1`, `Cus 2`, `Cus 3` and so on. No more walls of digits.
-2. **Welcomes them once.** Your group invite goes out automatically on their
+2. **Welcomes new people once.** Your welcome message goes out on their
    first ever message. Never twice, never to someone you already have.
 3. **Nobody is left waiting.** If you have not replied in 10 minutes, it tells
    them you have seen the message. You choose the wording and the wait.
@@ -140,15 +140,37 @@ Sign in with the password from Step 4. Everything you change here applies
 | **Bot on** | Turn everything off in one click. |
 | **Save new customers** | Save new numbers as `Cus 1`, `Cus 2` … |
 | **Next number** | The number the next customer gets. |
-| **Group invite** | The welcome message sent on someone's first message. Leave it empty and nothing is sent. |
+| **Wait before saving** | Minutes to wait before saving someone. `0` saves them straight away. |
+| **Welcome message** | Sent on someone's first message. Never sent to anyone already in your contacts. Leave it empty and nothing is sent. |
 | **No-reply chase** | Message customers you haven't answered yet. |
 | **Only brand-new customers** | Keep this **on**. Off means it will also chase people you have known for months. |
 | **Wait (minutes)** | How long before it chases. |
 | **Preset broadcast** | See below. |
 
-> The four numbers at the top — **Next no. / Saved / Greeted / Waiting** — are
-> your health check. If **Next no.** is stuck on `1`, something is wrong and a
-> red box on the page will tell you what.
+> The numbers at the top — **Next no. / Saved / Greeted / Waiting / Memory** —
+> are your health check. If **Next no.** is stuck on `1`, something is wrong
+> and a red box on the page will tell you what.
+
+### Who gets the welcome message
+
+**Only people you do not already know.** If someone is in your phone's
+contacts — under any name at all, whether the bot saved them as `Cus 214` or
+you saved them yourself as "Kasun tyres" — they will **never** be welcomed.
+
+They are an existing customer. Welcoming them to a shop they have been buying
+from for months makes the bot look like it has forgotten them.
+
+### Waiting before you save someone
+
+By default a new number goes into your contacts the moment they message. Set
+**Wait before saving** to `10` and the bot waits ten minutes first.
+
+Why you might want that: wrong numbers, people who message once and vanish,
+and anyone who says "sorry, wrong chat" never take up a `Cus` number. Only
+people still there after the wait get saved.
+
+The hint under the box tells you how many people are currently waiting. The
+wait survives a restart — nobody is forgotten halfway through it.
 
 ---
 
