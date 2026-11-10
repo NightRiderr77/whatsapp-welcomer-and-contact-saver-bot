@@ -182,8 +182,13 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
           const older = await window
             .require('WAWebChatLoadMessages')
             .loadEarlierMsgs({ chat });
+          /* Read the collection again instead of adding `older` to what we had.
+             On a chat not yet opened this session, loadEarlierMsgs returns
+             everything EXCEPT the newest message, which it puts straight into
+             the collection — so stitching the two together dropped the last
+             thing the owner posted (the FAQ went missing that way). */
+          msgs = chat.msgs.getModelsArray().filter(keep);
           if (!older || !older.length) break;
-          msgs = [...older.filter(keep), ...msgs];
         }
 
         /* The id is a MsgKey, and `_serialized` is not always populated on the
@@ -256,8 +261,26 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
       const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
       if (!chat) throw new Error('the destination chat could not be opened');
 
+      /* WhatsApp Web now loads its forward code only when somebody opens the
+         forward screen, so on a fresh page the module is simply not there and
+         every forward failed with "reading 'forwardMessages'". Preloading that
+         screen's bundle brings it in, exactly as tapping Forward would. */
+      let fwd = window.require('WAWebChatForwardMessage');
+      if (!fwd || typeof fwd.forwardMessages !== 'function') {
+        try {
+          await window.require('WAWebForwardMessageFlowLoadable').ForwardMessageFlowLoadable.preload();
+        } catch (e) { /* checked just below */ }
+        for (let i = 0; i < 40 && !(fwd && typeof fwd.forwardMessages === 'function'); i++) {
+          await new Promise((r) => setTimeout(r, 250));
+          fwd = window.require('WAWebChatForwardMessage');
+        }
+      }
+      if (!fwd || typeof fwd.forwardMessages !== 'function') {
+        throw new Error('WhatsApp did not load its forward code');
+      }
+
       try {
-        return await window.require('WAWebChatForwardMessage').forwardMessages({
+        return await fwd.forwardMessages({
           chat, msgs: [msg], multicast: true, includeCaption: true,
           appendedText: undefined,
         });
@@ -336,6 +359,9 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
             directPath: msg.directPath, encFilehash: msg.encFilehash,
             filehash: msg.filehash, mediaKey: msg.mediaKey,
             mediaKeyTimestamp: msg.mediaKeyTimestamp, type: msg.type,
+            /* Without it WhatsApp now assumes application/octet-stream and
+               refuses: "Unexpected mimetype ... for media type video". */
+            mimetype: msg.mimetype,
             signal: new AbortController().signal, downloadQpl: mockQpl,
           });
         const toB64 = window.WWebJS.arrayBufferToBase64Async || window.WWebJS.arrayBufferToBase64;
