@@ -213,6 +213,7 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
                media message live in `caption`. */
             text: hasMedia ? (m.caption || '') : (m.body || ''),
             hasMedia,
+            hash: hasMedia ? String(m.filehash || '') : '',
             t: m.t || 0,
           };
         }).filter((m) => m.id || m.text);
@@ -228,11 +229,25 @@ function createForwarder({ client, loadSettings, note, log, onSent, rememberGrou
       throw new Error('that group could not be opened. Trying again will look it up afresh.');
     }
 
-    const messages = raw
+    const ordered = raw
       // Only what the owner put there, and only if it carries something.
       .filter((m) => m.fromMe && (m.text || m.hasMedia))
-      .sort((a, b) => a.t - b.t)
-      .slice(-limit);
+      .sort((a, b) => a.t - b.t);
+
+    /* The same message twice is never wanted, and it happens: a device linked
+       later sees only the newest of the old posts, so the template gets posted
+       again and that newest one is now in the group twice. Keep the LATEST copy
+       of each, so the order is the order of the most recent posting. */
+    const seen = new Set();
+    const messages = [];
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      const m = ordered[i];
+      const key = `${m.hasMedia ? 'media' : 'text'}|${m.hash}|${m.text}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      messages.unshift(m);
+    }
+    messages.splice(0, Math.max(0, messages.length - limit));
 
     /* Deliberately not cached when empty. An empty read is far more likely to
        mean "the history had not loaded yet" than "the group is empty", and
