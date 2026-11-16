@@ -395,6 +395,48 @@ client.on('disconnected', (reason) => {
   client.destroy().catch(() => {}).finally(() => process.exit(1));
 });
 
+/* ─── Watchdog: a connection that dies without saying so ─────────────────────
+   On 13 Nov 2026 the bot went silent for three days: process up, browser up,
+   the memory sweep logging every five minutes, but no message arrived after
+   about 06:00 and WhatsApp never fired 'disconnected', so nothing restarted it.
+   Two checks catch that. The socket state WhatsApp Web itself reports; and
+   silence, because this account gets messages (customers and groups) all day,
+   so hours of nothing at all means the line is dead, not quiet. The cure is the
+   same as for a disconnect: exit and let the supervisor start a clean process.
+   The session is kept, so no QR. SILENCE_RESTART_HOURS=0 turns the silence
+   check off. */
+const WATCH_MS       = 2 * 60_000;
+const BAD_CHECKS_MAX = 3;                       // about 6 minutes not CONNECTED
+const SILENCE_MS     = Number(process.env.SILENCE_RESTART_HOURS ?? 3) * 3_600_000;
+let badChecks = 0;
+let watchdogSaidOk = false;
+client.on('change_state', (state) => log('WhatsApp state:', state));
+setInterval(async () => {
+  if (!client.info) return;                     // still starting, or waiting for a QR scan
+  let state;
+  try {
+    state = await Promise.race([
+      client.getState(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('no answer in 30s')), 30_000)),
+    ]);
+  } catch (e) {
+    state = `unknown (${e.message})`;
+  }
+  if (state === 'CONNECTED') {
+    badChecks = 0;
+    if (!watchdogSaidOk) { watchdogSaidOk = true; log('watchdog: WhatsApp connected; checking every 2 min'); }
+  } else {
+    log(`watchdog: WhatsApp is ${state} (check ${++badChecks} of ${BAD_CHECKS_MAX})`);
+  }
+  const quietFor = Date.now() - lastBusyAt;
+  const why = badChecks >= BAD_CHECKS_MAX ? `not connected for ${BAD_CHECKS_MAX} checks in a row`
+    : SILENCE_MS > 0 && quietFor >= SILENCE_MS ? `no message of any kind for ${(quietFor / 3_600_000).toFixed(1)}h`
+    : null;
+  if (!why) return;
+  log(`watchdog: ${why} — exiting so the supervisor restarts us clean`);
+  client.destroy().catch(() => {}).finally(() => process.exit(1));
+}, WATCH_MS);
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
