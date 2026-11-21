@@ -708,7 +708,16 @@ client.on('message_create', async (msg) => {
 const SWEEP_MS  = 30_000;
 const FORGET_MS = 24 * 60 * 60 * 1000; // drop chased chats after a day
 
-setInterval(async () => {
+/* One sweep at a time. A slow one (many chats, slow Chromium) would otherwise
+   overlap the next, and both would pass the !notified check for the same chat. */
+let sweeping = false;
+setInterval(() => {
+  if (sweeping) return;
+  sweeping = true;
+  sweep().catch((e) => log('sweep failed:', e.message)).finally(() => { sweeping = false; });
+}, SWEEP_MS);
+
+async function sweep() {
   const s = loadSettings();
 
   // Anyone whose save delay has run out. Its own try/catch: a save that fails
@@ -752,7 +761,7 @@ setInterval(async () => {
       note(`no-reply to ${info.name} failed: ${e.message}`);
     }
   }
-}, SWEEP_MS);
+}
 
 // ─── Stale profile locks ─────────────────────────────────────────────────────
 //
