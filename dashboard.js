@@ -11,7 +11,7 @@
  * day — the counter, the message text and the settings file's health are the
  * first things on the page, because those are what go wrong.
  *
- * Security, given this listens on a public VPS port:
+ * Security, in case it is ever put on a public port (the default is loopback):
  *
  *   • A password is REQUIRED. Without DASH_PASSWORD the dashboard does not
  *     start at all, and the bot says so. The previous build made auth optional,

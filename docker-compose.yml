@@ -41,10 +41,14 @@ services:
       # Chromium does not decode avatars or thumbnails, which is most of what
       # a long chat list costs. Set to on only if WhatsApp Web ever needs them.
       - IMAGES=${IMAGES:-off}
+      # Listen on the container's interface; the port line below decides who
+      # can reach it from outside.
+      - DASH_HOST=0.0.0.0
     ports:
-      # The owner panel. Change the left-hand side to 127.0.0.1:8091 to keep it
-      # off the internet and reach it over an SSH tunnel instead.
-      - "8091:8091"
+      # The owner panel is plain HTTP, so it is published on the server's own
+      # loopback only. Reach it over an SSH tunnel (see the README). Changing
+      # this to "8091:8091" puts your password on the internet in cleartext.
+      - "127.0.0.1:8091:8091"
     volumes:
       # The WhatsApp login. Delete this to force a fresh QR.
       - ./.wwebjs_auth:/app/.wwebjs_auth

@@ -124,10 +124,18 @@ watching the log — the bot keeps running.
 
 ![Control panel](docs/dashboard.svg)
 
-Open this in any browser, on your phone or your laptop:
+The panel only listens on the server itself, so nobody on the internet can
+reach it. To open it, run this **on your computer** (or in an SSH app on your
+phone that supports port forwarding):
+
+```bash
+ssh -L 8091:127.0.0.1:8091 root@YOUR-SERVER-IP
+```
+
+then open this in a browser on the same device:
 
 ```
-http://YOUR-SERVER-IP:8091
+http://localhost:8091
 ```
 
 Sign in with the password from Step 4. Everything you change here applies
@@ -379,29 +387,19 @@ sudo ss -lntp | grep 8091
 ```
 
 **No output is good** — nothing else is using it. If something answers, change
-the left-hand number in `docker-compose.yml` (`"8091:8091"` to `"8092:8091"`)
-and use that instead.
+the left-hand port in `docker-compose.yml` (`"127.0.0.1:8091:8091"` to
+`"127.0.0.1:8092:8091"`) and use that instead.
 
-### Your control panel is open to the internet
+### Your control panel stays off the internet
 
-Docker opens port 8091 to everyone, and it does this **underneath your
-firewall** — a `ufw deny` rule will not stop it. Your password is the only
-thing protecting it, so make that password long.
+The panel is plain HTTP, so `docker-compose.yml` publishes it on
+`127.0.0.1` only: your password never crosses the internet in cleartext.
+Open it through the SSH tunnel shown under **Your control panel**.
 
-To close it off completely instead, edit `docker-compose.yml`:
-
-```bash
-nano ~/welcomer-bot/docker-compose.yml
-```
-
-Change `- "8091:8091"` to `- "127.0.0.1:8091:8091"`, save, then
-`docker compose up -d`. The panel is now reachable only from the server
-itself. To open it on your own computer, run this **on your computer** and
-then visit `http://localhost:8091`:
-
-```bash
-ssh -L 8091:127.0.0.1:8091 root@YOUR-SERVER-IP
-```
+Do not change the port line back to `"8091:8091"`. Docker opens a port like
+that to everyone, **underneath your firewall** (a `ufw deny` rule will not stop
+it). If you need the panel without a tunnel, put it behind an HTTPS reverse
+proxy such as Caddy instead.
 
 ---
 
@@ -515,8 +513,8 @@ cd ~/welcomer-bot && docker compose down && docker compose up -d --build
 
 **The panel won't open**
 
-Check the bot is running with `docker compose ps`, and that your server's
-firewall allows port `8091`.
+Check the bot is running with `docker compose ps`, and that your SSH tunnel
+(`ssh -L 8091:127.0.0.1:8091 root@YOUR-SERVER-IP`) is open.
 
 **`Permission denied` when running a script**
 
