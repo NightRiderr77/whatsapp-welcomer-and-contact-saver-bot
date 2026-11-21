@@ -11,6 +11,8 @@
 #   ./backup.sh --live       pack without stopping (see the warning below)
 #
 set -euo pipefail
+# The archive holds the WhatsApp login and .env: readable by its owner only.
+umask 077
 cd "$(dirname "$0")"
 # Branding, drawn without colour codes so it reads the same in a terminal, in
 # `docker compose logs`, and in a log file somebody opens six months from now.
