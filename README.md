@@ -129,7 +129,7 @@ reach it. To open it, run this **on your computer** (or in an SSH app on your
 phone that supports port forwarding):
 
 ```bash
-ssh -L 8091:127.0.0.1:8091 root@YOUR-SERVER-IP
+ssh -L 8091:127.0.0.1:8091 ubuntu@YOUR-SERVER-IP
 ```
 
 then open this in a browser on the same device:
@@ -514,7 +514,7 @@ cd ~/welcomer-bot && docker compose down && docker compose up -d --build
 **The panel won't open**
 
 Check the bot is running with `docker compose ps`, and that your SSH tunnel
-(`ssh -L 8091:127.0.0.1:8091 root@YOUR-SERVER-IP`) is open.
+(`ssh -L 8091:127.0.0.1:8091 ubuntu@YOUR-SERVER-IP`) is open.
 
 **`Permission denied` when running a script**
 
