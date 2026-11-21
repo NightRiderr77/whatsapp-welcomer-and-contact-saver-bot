@@ -7,7 +7,8 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { sanitise } = require(path.join(__dirname, '..', 'dashboard.js'));
+const http = require('http');
+const { sanitise, startDashboard } = require(path.join(__dirname, '..', 'dashboard.js'));
 const { shouldWelcome, saveDueAt } = require(path.join(__dirname, '..', 'rules.js'));
 
 let passed = 0;
@@ -127,4 +128,35 @@ console.log('when the contact gets saved');
   ok('an absurd delay is capped at a day rather than parked forever');
 }
 
-console.log('\n' + passed + ' checks passed.');
+console.log('');
+console.log('the contact counter');
+
+{
+  const { contactNextNumber, ...rest } = current;
+  assert.strictEqual(sanitise(rest, { ...current, contactNextNumber: 44 }).contactNextNumber, 44);
+  ok('a save that does not send the counter leaves the live one alone');
+}
+
+// The panel must not report "saved" when the bot refused to write a broken file.
+(async () => {
+  const server = startDashboard({
+    port: 0, host: '127.0.0.1', password: 'pw', log: () => {}, status: () => ({}),
+    readSettings: () => current, writeSettings: () => null,
+  });
+  await new Promise((r) => server.once('listening', r));
+  const { port } = server.address();
+  const post = (p, body, cookie) => new Promise((resolve, reject) => {
+    const req = http.request({ port, host: '127.0.0.1', path: p, method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) } },
+    (res) => { res.resume(); res.on('end', () => resolve(res)); });
+    req.on('error', reject);
+    req.end(JSON.stringify(body));
+  });
+  const login = await post('/login', { password: 'pw' });
+  const cookie = String(login.headers['set-cookie']).split(';')[0];
+  const res = await post('/api/settings', current, cookie);
+  server.close();
+  assert.strictEqual(res.statusCode, 409);
+  ok('a refused write comes back as an error, not as saved');
+  console.log('\n' + passed + ' checks passed.');
+})().catch((e) => { console.error(e); process.exit(1); });
