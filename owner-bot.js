@@ -43,9 +43,7 @@ const QR_FILE       = path.join(__dirname, 'qr.png');
 const PAIR_NUMBER   = String(process.env.PAIR_NUMBER || '').replace(/\D/g, '');
 
 const DASH_PORT     = Number(process.env.DASH_PORT || 8091);
-// Loopback by default: the panel is plain HTTP. docker-compose sets 0.0.0.0
-// inside the container and publishes it on the host's 127.0.0.1 only.
-const DASH_HOST     = process.env.DASH_HOST || '127.0.0.1';
+const DASH_HOST     = process.env.DASH_HOST || '0.0.0.0';
 const DASH_PASSWORD = process.env.DASH_PASSWORD || '';
 
 const log = (...a) => console.log(`[${new Date().toISOString()}] [owner]`, ...a);
