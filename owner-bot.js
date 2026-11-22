@@ -189,16 +189,40 @@ function ensureSettingsFile() {
   }
 
   if (!st) {
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(DEFAULTS, null, 2));
+    writeFileAtomic(SETTINGS_FILE, JSON.stringify(DEFAULTS, null, 2));
     log(`no settings file — wrote defaults to ${SETTINGS_FILE}. Edit it; changes apply immediately.`);
   }
 }
 
-/** Persist one change without clobbering hand edits to the other keys. */
+/** Write via a temp file and rename, so a kill mid-write leaves the old file
+    whole instead of half a file that then loads as empty or as defaults. */
+function writeFileAtomic(file, text) {
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, text);
+  try { fs.renameSync(tmp, file); }
+  catch {
+    // A single bind-mounted file cannot be renamed over; write it in place.
+    fs.rmSync(tmp, { force: true });
+    fs.writeFileSync(file, text);
+  }
+}
+
+/**
+ * Persist one change without clobbering hand edits to the other keys.
+ *
+ * Returns null, and writes nothing, while the file cannot be read: merging the
+ * patch into DEFAULTS and saving that would turn a typo into the owner's whole
+ * config replaced by defaults, and the counter back at 1.
+ */
 function patchSettings(patch) {
-  const next = { ...loadSettings(), ...patch };
+  const current = loadSettings();
+  if (!settingsHealth.ok) {
+    log('SETTINGS: not saving — the file cannot be read, so saving now would overwrite it with defaults');
+    return null;
+  }
+  const next = { ...current, ...patch };
   try {
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2));
+    writeFileAtomic(SETTINGS_FILE, JSON.stringify(next, null, 2));
   } catch (e) {
     log('could not write settings:', e.message);
   }
@@ -214,7 +238,8 @@ function loadIdSet(file) {
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
     return new Set(Array.isArray(raw.ids) ? raw.ids : []);
-  } catch {
+  } catch (e) {
+    if (e.code !== 'ENOENT') log(`STATE: ${file} could not be read (${e.message}) — starting with it EMPTY`);
     return new Set();
   }
 }
@@ -237,14 +262,15 @@ function loadWaiting() {
   try {
     const raw = JSON.parse(fs.readFileSync(WAITING_FILE, 'utf8'));
     return new Map(Array.isArray(raw.waiting) ? raw.waiting.map((w) => [w.id, w]) : []);
-  } catch {
+  } catch (e) {
+    if (e.code !== 'ENOENT') log(`STATE: ${WAITING_FILE} could not be read (${e.message}) — starting with it EMPTY`);
     return new Map();
   }
 }
 
 function writeWaiting() {
   try {
-    fs.writeFileSync(WAITING_FILE, JSON.stringify({
+    writeFileAtomic(WAITING_FILE, JSON.stringify({
       waiting: [...waitingToSave.entries()].map(([id, w]) => ({ id, ...w })),
     }));
   } catch (e) {
@@ -256,7 +282,7 @@ function remember(set, file, id) {
   if (set.has(id)) return;
   set.add(id);
   try {
-    fs.writeFileSync(file, JSON.stringify({ ids: [...set] }));
+    writeFileAtomic(file, JSON.stringify({ ids: [...set] }));
   } catch (e) {
     // Losing the file means re-greeting somebody after a restart. Annoying;
     // not worth crashing the bot over.
@@ -532,6 +558,8 @@ async function queueSave(chatId, name) {
 
 /** Anyone whose wait is up. Called from the sweep. */
 async function saveAnyoneDue() {
+  loadSettings();
+  if (!settingsHealth.ok) return;          // keep them waiting; the counter is unreadable
   const now = Date.now();
   for (const [chatId, w] of waitingToSave) {
     if (now < w.at) continue;
@@ -571,6 +599,12 @@ async function saveContact(chatId, name) {
 
       // Read the counter inside the lock, so no two saves can see the same one.
       const n = Number(loadSettings().contactNextNumber) || 1;
+      // A broken settings file reads as the default counter of 1. Saving now
+      // would name them "Cus 1" again; leave them for the next message.
+      if (!settingsHealth.ok) {
+        note(`did not save ${name}: settings.json cannot be read, so the counter is unknown`);
+        return;
+      }
       try {
         await client.saveOrEditAddressbookContact(number, 'Cus ' + n, '', true);
         remember(saved, SAVED_FILE, chatId);
@@ -672,7 +706,16 @@ client.on('message_create', async (msg) => {
 const SWEEP_MS  = 30_000;
 const FORGET_MS = 24 * 60 * 60 * 1000; // drop chased chats after a day
 
-setInterval(async () => {
+/* One sweep at a time. A slow one (many chats, slow Chromium) would otherwise
+   overlap the next, and both would pass the !notified check for the same chat. */
+let sweeping = false;
+setInterval(() => {
+  if (sweeping) return;
+  sweeping = true;
+  sweep().catch((e) => log('sweep failed:', e.message)).finally(() => { sweeping = false; });
+}, SWEEP_MS);
+
+async function sweep() {
   const s = loadSettings();
 
   // Anyone whose save delay has run out. Its own try/catch: a save that fails
@@ -716,7 +759,7 @@ setInterval(async () => {
       note(`no-reply to ${info.name} failed: ${e.message}`);
     }
   }
-}, SWEEP_MS);
+}
 
 // ─── Stale profile locks ─────────────────────────────────────────────────────
 //

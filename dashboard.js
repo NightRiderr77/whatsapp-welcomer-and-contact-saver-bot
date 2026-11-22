@@ -288,6 +288,10 @@ const $ = id => document.getElementById(id);
 const api = (p, o) => fetch(p, o).then(r => { if (r.status === 401) location.reload(); return r.json(); });
 let dirty = false;
 document.addEventListener('input', () => { dirty = true; });
+// Sent only when typed in: the bot moves the counter on while this page sits
+// open, and posting the number it loaded with would rewind it.
+let cnextTouched = false;
+$('cnext').addEventListener('input', () => { cnextTouched = true; });
 
 function paintSettings(s) {
   $('enabled').checked    = s.enabled;
@@ -386,7 +390,7 @@ $('save').onclick = async () => {
     body: JSON.stringify({
       enabled: $('enabled').checked,
       autoSaveContacts: $('autoSave').checked,
-      contactNextNumber: +$('cnext').value,
+      contactNextNumber: cnextTouched ? +$('cnext').value : undefined,
       contactSaveDelayMinutes: +$('cdelay').value,
       invite:  { enabled: $('invEnabled').checked, message: $('invMsg').value },
       noReply: { enabled: $('nrEnabled').checked, minutes: +$('nrMin').value,
@@ -395,9 +399,11 @@ $('save').onclick = async () => {
                  group: $('fwGroup').value },
     }),
   });
-  dirty = false;
-  paintSettings(next);
   $('save').disabled = false;
+  if (next.error) { $('ok').textContent = next.error; return; }
+  dirty = false;
+  cnextTouched = false;
+  paintSettings(next);
   $('ok').textContent = 'Saved — live now';
   setTimeout(() => { $('ok').textContent = ''; }, 2500);
 };
@@ -536,6 +542,7 @@ function startDashboard(opts) {
     if (url.pathname === '/api/settings' && req.method === 'POST') {
       const body = await readBody(req);
       const next = writeSettings(sanitise(body, readSettings()));
+      if (!next) return sendJson(res, 409, { error: 'Not saved: settings.json cannot be read. Fix the file first.' });
       log('settings changed from the dashboard');
       return sendJson(res, 200, next);
     }
